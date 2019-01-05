@@ -1,6 +1,10 @@
+#!/usr/bin/env python3
+
 from tkinter import *
 from tkinter import messagebox
 from tkinter import ttk
+from tkinter import filedialog
+import tkinter.font as tkfont
 import os
 import pickle
 import subprocess
@@ -8,10 +12,14 @@ import re
 import datetime
 
 ROOTPATH = os.getcwd()
-lib_file = "./papers.dat"
+lib_file = "papers.dat"
 conference_file = "./conference.dat"
 DEFAULT_YEAR = 1900
+MAX_RATING = 5
 OTHERS_CONFERENCE = 'others'
+
+# Build a list of tuples for each file type the file dialog should display
+my_filetypes = [('all files', '.*'), ('pdf files', '.pdf'), ('text files', '.txt')]
 
 class Category:
     def __init__(self, label):
@@ -135,7 +143,8 @@ class Conference:
         c_map = {}
         with open(file_name) as fin:
             for line in fin.readlines():
-                items = line.strip().lower().split('\t')
+                line = line.strip().lower()
+                items = re.split('\t|    ', line)
                 if len(items) != 2: continue
                 c_map[items[0]] = items[1]
         return c_map
@@ -164,6 +173,9 @@ class Bib:
         
         self._first_title_word = ""
         self._first_author_name = ""
+
+        self.bibtex = ""
+        self.type = 0       # 0: conference, 1: jornal
 
     @property
     def title(self):
@@ -221,22 +233,33 @@ class Bib:
     
     def __repr__(self):
         tmp_cite = self._first_author_name + str(self.year)+ self._first_title_word
-        return "@inproceedings{{{},\n  title={{{}}},\n  author={{{}}},\n  booktitle={{{}}},\n  year={{{}}}\n}}".format(tmp_cite, self.title, Author.bibString(self.author), self.conference.label, str(self.year))
+        if self.type == 1:
+            return "@article{{{},\n  title={{{}}},\n  author={{{}}},\n  journal={{{}}},\n  year={{{}}}\n}}".format(tmp_cite, self.title, Author.bibString(self.author), self.conference.label, str(self.year))
+        else:
+            return "@inproceedings{{{},\n  title={{{}}},\n  author={{{}}},\n  booktitle={{{}}},\n  year={{{}}}\n}}".format(tmp_cite, self.title, Author.bibString(self.author), self.conference.label, str(self.year))
 
+type_re = re.compile(r'^@inproceedings(.*)')
 title_re = re.compile(r'(?<=[^a-z]title\={).+?(?=})')
 author_re = re.compile(r'(?<=[^a-z]author\={).+?(?=})')
-conference_re = re.compile(r'(?<=[^a-z]booktitle\={).+?(?=})')
+conference_re = re.compile(r'(?<=[^a-z]booktitle\={).+?(?=})|(?<=[^a-z]journal\={).+?(?=})')
 year_re = re.compile(r'(?<=[^a-z]year\={).+?(?=})')
 class bibParser:
 
     @classmethod
     def parse(cls, bib_str, lib=None):
         b = Bib()
+        b.bibtex = bib_str
+        b.type = cls.typeParser(bib_str)
         b.title = cls.titleParser(bib_str)
         b.author = cls.authorParser(bib_str, lib=lib)
         b.conference = cls.conferenceParser(bib_str, lib=lib)
         b.year = cls.yearParser(bib_str)
         return b
+    
+    @classmethod
+    def typeParser(cls, bib_str):
+        m = type_re.match(bib_str)
+        return 0 if m else 1
     
     @classmethod
     def titleParser(cls, bib_str):
@@ -273,6 +296,7 @@ class Paper(object):
         self.id = -1
         self.bib = Bib()
         self._path = ""     # relative path to support cloud storage
+        
         # optional information
         self._dataset = []
         self._tag = []
@@ -281,6 +305,23 @@ class Paper(object):
         self.comment = ""
         self.hasGithub = False
         self.hasRead = False
+        self._rating = 0
+
+    @property
+    def bibtex(self):
+        return self.bib.bibtex
+    
+    @bibtex.setter
+    def bibtex(self, value):
+        self.bib.bibtex = value
+    
+    @property
+    def papertype(self):
+        return self.bib.type
+    
+    @papertype.setter
+    def papertype(self, value):
+        self.bib.type = value
 
     @property
     def title(self):
@@ -315,19 +356,30 @@ class Paper(object):
         self.bib.year = value
 
     @property
+    def rating(self):
+        return str(self._rating)
+
+    @rating.setter
+    def rating(self, value):
+        self._rating = 0
+        if isinstance(value, str) : value = int(value)
+        if isinstance(value, int) and value >= 0 and value <= MAX_RATING:
+            self._rating = value
+
+    @property
     def path(self):
         return self._path
 
     @path.setter
     def path(self, value):
         self._path = ""
-        full_path = os.path.join(ROOTPATH, value)
+        full_path = os.path.abspath(value)
         if os.path.isfile(full_path):
-            self._path = os.path.normpath(value)
+            self._path = os.path.relpath(full_path)
 
     @property
     def full_path(self):
-        return os.path.join(ROOTPATH, self._path)
+        return os.path.abspath(self._path)
 
     @property
     def dataset(self):
@@ -387,16 +439,16 @@ class Paper(object):
         return "title: {}\nauthor: {}\nconference: {}\nyear: {}\npath: {}\ntags: {}\ndataset: {}\nproject: {}\ncomment: {}\n{}\n".format(self.title, self.author, self.conference, self.year, self.full_path, self.tag, self.dataset, self.project, self.comment, 'Has released codes!' if self.hasGithub else 'No released codes!')
     
     def checkState(self):
-        state = True
-        if self.title == "" or self.author == "" or self.conference == "" or self.year == "" :
-            state = False
+        state = 0
         if self._path == "" :
-            state = False
+            state = 1
+        elif self.title == "" or self.author == "" or self.conference == "" or self.year == "" :
+            state = 2
         return state
 
 class Library:
     def __init__(self):
-        self.data_file = os.path.join(ROOTPATH, lib_file)
+        self.data_file = os.path.abspath(lib_file)
 
         self._years = {}     # {year:set(paper_id, ...), ...}
 
@@ -405,6 +457,7 @@ class Library:
         self._datasets = {}   # dataset_label: Conference()
         self._tags = {}   # tag_label: Conference()
         self._projects = {}   # project_label: Conference()
+        self._ratings = {}      # rating: set(paper_id, ...)
 
         self._papers = {}   # paper_id: Paper()
         self.paper_id_pool = set()
@@ -437,6 +490,10 @@ class Library:
     @property
     def projects(self):
         return self._projects
+    
+    @property
+    def ratings(self):
+        return self._ratings
     
     def parseConference(self, c_str):
         c_list = self.findConference(c_str.lower())
@@ -524,6 +581,10 @@ class Library:
                 p.papers.remove(paper_id)
                 if len(p.papers) == 0:
                     del self.projects[p.label]
+            
+            self.ratings[del_paper._rating].remove(paper_id)
+            if len(self.ratings[del_paper._rating]) == 0:
+                del self.ratings[del_paper._rating]
 
             del self._papers[paper_id]
             self.paper_id_pool.add(paper_id)
@@ -535,6 +596,7 @@ class Library:
         paper.id = paper_id
 
         self.addPaperYear(paper_id, paper.bib.year)
+        self.addPaperRating(paper_id, paper._rating)
 
         paper.bib.conference.papers.add(paper_id)
         
@@ -550,32 +612,52 @@ class Library:
         tmp_paper_set.add(paper_id)
         self._years[year] = tmp_paper_set
     
+    def addPaperRating(self, paper_id, rating):
+        tmp_paper_set = self._ratings.get(rating, set())
+        tmp_paper_set.add(paper_id)
+        self._ratings[rating] = tmp_paper_set
+    
     def addPaperCategory(self, paper_id, categories, target_categories):
         for c in categories:
             if len(c.papers) == 0:
                 target_categories[c.label] = c
             c.papers.add(paper_id)
     
+    def revisePaperBib(self, paper_id, bib):
+        target_paper = self.papers[paper_id]
+
+        if target_paper.bibtex != bib.bibtex:
+            target_paper.bib.bibtex = bib.bibtex
+
+        if target_paper.papertype != bib.type:
+            target_paper.bib.type = bib.type
+
+        if target_paper.title != bib.title:
+            target_paper.bib.title = bib.title
+        
+        if int(target_paper.year) != bib.year:
+            self.years[target_paper.bib.year].remove(paper_id)
+            if len(self.years[target_paper.bib.year]) == 0 :
+                del self.years[target_paper.bib.year]
+            self.addPaperYear(paper_id, bib.year)
+            target_paper.bib.year = bib.year
+
+        if target_paper.conference != bib.conference.label:
+            target_paper.bib.conference.papers.remove(paper_id)
+            target_paper.bib.conference = bib.conference
+            bib.conference.papers.add(paper_id)
+
+        if target_paper.author != Author.guiString(bib.author):
+            target_paper.bib.author = self.revisePaperCategory(paper_id, bib.author, target_paper.bib.author, self.authors)
+    
     def revisePaper(self, paper_id, paper):
         target_paper = self.papers[paper_id]
 
         if target_paper.path != paper.path:
             target_paper.path = paper.path
-            if target_paper.path != paper.path:
-                return True
 
-        if target_paper.title != paper.title:
-            target_paper.bib.title = paper.bib.title
-        
-        if target_paper.year != paper.year:
-            target_paper.bib.year = paper.bib.year
+        self.revisePaperBib(paper_id, paper.bib)
 
-        if target_paper.conference != paper.conference:
-            target_paper.bib.conference.papers.remove(paper_id)
-            target_paper.bib.conference = paper.bib.conference
-
-        if target_paper.author != paper.author:
-            target_paper.bib.author = self.revisePaperCategory(paper_id, paper.bib.author, target_paper.bib.author, self.authors)
         if target_paper.tag != paper.tag:
             target_paper._tag = self.revisePaperCategory(paper_id, paper._tag, target_paper._tag, self.tags)
         if target_paper.dataset != paper.dataset:
@@ -590,8 +672,13 @@ class Library:
             target_paper.hasRead = paper.hasRead
         if target_paper.hasGithub != paper.hasGithub:
             target_paper.hasGithub = paper.hasGithub
-
-        return False
+        
+        if target_paper.rating != paper.rating:
+            self.ratings[target_paper._rating].remove(paper_id)
+            if len(self.ratings[target_paper._rating]) == 0:
+                del self.ratings[target_paper._rating]
+            self.addPaperRating(paper_id, paper._rating)
+            target_paper._rating = paper._rating
     
     def revisePaperCategory(self, paper_id, source_category, target_category, categories):
         for c in source_category:
@@ -629,14 +716,14 @@ class Library:
             return True
         return False
     
-    def searchDuplicatePaper(self, path):
-        norm_path = os.path.normpath(path)
+    def searchDuplicatePaper(self, paper):
+        norm_path = os.path.normpath(paper.path)
         for pi in self.papers:
-            if norm_path == self.papers[pi].path:
+            if norm_path == self.papers[pi].path or paper.title == self.papers[pi].title:
                 return pi
         return -1
 
-    # todo: support fuzzy and comment
+    # todo: better fuzzy comment
     def findPaper(self, paper, support_fuzzy=False, fuzzy_window=0):
         
         title_papers = set()
@@ -731,6 +818,13 @@ class Library:
                     papers |= self.years[year-i-1]
         return papers
     
+    def findRating(self, rating):
+        papers = set()
+        rating = int(rating)
+        if rating in self.ratings:
+            papers |= self.ratings[rating]
+        return papers
+    
     def findUnread(self):
         papers = [pi for pi in self.papers if not self.papers[pi].hasRead]
         return set(papers)
@@ -787,6 +881,9 @@ class LibraryGUI:
         self.paper_to_tree = {}
         self.authorize_conference_list = []
 
+        self.display_columns = ('Title', 'Conference', 'Year', 'Read', 'Rating')
+        self.display_columns_values = lambda x: (x.title, x.conference, x.year, 1 if x.hasRead else 0, x.rating)
+
         # gui
         self.root = Tk()
         self.root.title("Cloud Paper Manager")
@@ -795,7 +892,9 @@ class LibraryGUI:
         # add and revise
         self.add_page = ttk.Frame(self.pages)
 
-        self.display_papers = ttk.Treeview(self.add_page)  # lists of existing papers
+        self.display_papers = ttk.Treeview(self.add_page, height=3)  # lists of existing papers
+        self.dp_yscroll = ttk.Scrollbar(self.add_page, command=self.display_papers.yview, orient=VERTICAL)
+        self.display_papers.configure(yscrollcommand=self.dp_yscroll.set)
 
         # bibtex parser
         labelBib=StringVar()
@@ -803,7 +902,7 @@ class LibraryGUI:
         self.labelBibInput = Label(self.add_page, textvariable=labelBib)
         self.add_bib_input = Text(self.add_page, width=55, height=5)
         self.add_bib_input.bind("<Tab>", self.focus_next_widget)
-        self.bib_parser_button = Button(self.add_page, command = self.parseBib, text = "Parse")
+        self.bib_parser_button = ttk.Button(self.add_page, command = self.parseBib, text = "Parse")
 
         labelTitle=StringVar()
         labelTitle.set("Title:")
@@ -819,6 +918,8 @@ class LibraryGUI:
         labelPath.set("Path:")
         self.labelPathInput = Label(self.add_page, textvariable=labelPath)
         self.add_path_input = Entry(self.add_page, width=35)
+
+        self.path_button = ttk.Button(self.add_page, command = self.browseFiles, text = "...")
 
         labelTag = StringVar()
         labelTag.set("Tags:")
@@ -853,6 +954,12 @@ class LibraryGUI:
         self.spinval = StringVar()
         self.add_year_input = Spinbox(self.add_page, from_=DEFAULT_YEAR, to=datetime.datetime.now().year, textvariable=self.spinval)
 
+        labelRating = StringVar()
+        labelRating.set("Rating:")
+        self.labelRatingInput = Label(self.add_page, textvariable=labelRating)
+        self.r_spinval = StringVar()
+        self.add_rating_input = Spinbox(self.add_page, from_=0, to=MAX_RATING, textvariable=self.r_spinval)
+
         self.hasRead = BooleanVar()
         self.read_check = ttk.Checkbutton(self.add_page, text='Read', variable=self.hasRead,
 	    onvalue=True, offvalue=False)
@@ -861,13 +968,15 @@ class LibraryGUI:
         self.github_check = ttk.Checkbutton(self.add_page, text='Github', variable=self.hasGithub,
 	    onvalue=True, offvalue=False)
 
-        self.add_button = Button(self.add_page, command = self.addPaper, text = "Add")
-        self.del_button = Button(self.add_page, command = self.delPaper, text = "Remove")
-        self.revise_button = Button(self.add_page, command = self.revisePaper, text = "Revise")
-        self.find_button = Button(self.add_page, command = self.findPaper, text = "Find")
+        self.add_button = ttk.Button(self.add_page, command = self.addPaper, text = "Add")
+        self.del_button = ttk.Button(self.add_page, command = self.delPaper, text = "Remove")
+        self.revise_button = ttk.Button(self.add_page, command = self.revisePaper, text = "Revise")
+        self.find_button = ttk.Button(self.add_page, command = self.findPaper, text = "Find")
 
-        self.reset_button = Button(self.add_page, command = self.resetMode, text = "Reset")
-        self.serialize_button = Button(self.add_page, command = self.serialize, text = "Sync")
+        self.reset_button = ttk.Button(self.add_page, command = self.resetMode, text = "Reset")
+        self.serialize_button = ttk.Button(self.add_page, command = self.serialize, text = "Sync")
+
+        self.reparse_button = ttk.Button(self.add_page, command = self.reparse, text = "ReparseALL")
 
         # present
         self.present_page = ttk.Frame(self.pages)
@@ -878,7 +987,9 @@ class LibraryGUI:
         categories = StringVar()
         self.filter_category = ttk.Combobox(self.present_page, textvariable=categories)
 
-        self.display_filter = ttk.Treeview(self.present_page)  # lists of existing filters
+        self.display_filter = Listbox(self.present_page, height=5)  # lists of existing filters
+        self.df_yscroll = ttk.Scrollbar(self.present_page, command=self.display_filter.yview, orient=VERTICAL)
+        self.display_filter.configure(yscrollcommand=self.df_yscroll.set)
 
         self.display_category_papers = ttk.Treeview(self.present_page)  # lists of filtered papers
 
@@ -898,6 +1009,20 @@ class LibraryGUI:
         self.initPresentPage()
         self.initAddPage()
         self.initButtons()
+        self.initFonts()
+    
+    def initFonts(self):
+        default_font = tkfont.nametofont("TkDefaultFont")
+        default_font.configure(size=16)
+
+        text_font = tkfont.nametofont('TkTextFont')
+        text_font.configure(size=16)
+
+        text_font = tkfont.nametofont('TkFixedFont')
+        text_font.configure(size=16)
+
+        text_font = tkfont.nametofont('TkHeadingFont')
+        text_font.configure(size=16)
     
     def initLib(self):
         # load existing papers
@@ -907,30 +1032,35 @@ class LibraryGUI:
             self.paper_to_tree[p] = tree_id
     
     def initPresentPage(self):
-        self.filter_dict = {'conference':self.lib.conferences, 'year':self.lib.years, 'author':self.lib.authors, 'dataset':self.lib.datasets, 'tag':self.lib.tags, 'project':self.lib.projects}
+        self.filter_dict = {'conference':self.lib.conferences, 'year':self.lib.years, 'author':self.lib.authors, 'dataset':self.lib.datasets, 'tag':self.lib.tags, 'project':self.lib.projects, 'rating':self.lib.ratings}
         self.filter_category['value'] = ['please select'] + list(self.filter_dict.keys()) + ['others']
         self.filter_category['state'] = "readonly"
         self.filter_category.current(0)
         self.filter_category.bind('<<ComboboxSelected>>', self.filterListingEvent)
 
-        self.display_filter.heading('#0', text='Filter')
-        self.display_filter.bind("<<TreeviewSelect>>", self.filteredPaperEvent)
+        self.display_filter.bind("<<ListboxSelect>>", self.filteredPaperEvent)
         
-        self.display_category_papers['columns'] = ('title', 'conference', 'year')
+        self.display_category_papers['columns'] = self.display_columns
+        #hide #0 column for id
         self.display_category_papers['show'] = 'headings'
-        # self.display_papers.heading('#0', text='Title')
-        self.display_category_papers.heading('title', text='Title')
-        self.display_category_papers.heading('conference', text='Conference')
-        self.display_category_papers.heading('year', text='Year')
+        # sort column
+        for col in self.display_columns:
+            self.display_category_papers.heading(col, text=col, command=lambda _col=col: \
+                     self.treeview_sort_column(self.display_category_papers, _col, False))
+            self.display_category_papers.column(col, width=100, anchor='center')
         self.display_category_papers.bind("<Double-1>", self.openCategoryPaperEvent)
 
     def initAddPage(self):
-        self.display_papers['columns'] = ('title', 'conference', 'year')
+        self.display_papers['columns'] = self.display_columns
         # self.display_papers.heading('#0', text='Title')
+        # hide #0 column
         self.display_papers['show'] = 'headings'
-        self.display_papers.heading('title', text='Title')
-        self.display_papers.heading('conference', text='Conference')
-        self.display_papers.heading('year', text='Year')
+        # sort column
+        for col in self.display_columns:
+            self.display_papers.heading(col, text=col, command=lambda _col=col: \
+                     self.treeview_sort_column(self.display_papers, _col, False))
+            self.display_papers.column(col, width=100, anchor='center')
+
         self.display_papers.bind("<<TreeviewSelect>>", self.selectPaperEvent)
         self.display_papers.bind("<Double-1>", self.openPaperEvent)
 
@@ -938,6 +1068,18 @@ class LibraryGUI:
         self.add_conference['value'] = ['please select'] + self.authorize_conference_list
         self.add_conference['state'] = "readonly"
         self.add_conference.current(0)
+
+    def treeview_sort_column(self, tv, col, reverse):
+        l = [(tv.set(k, col), k) for k in tv.get_children('')]
+        l.sort(reverse=reverse)
+
+        # rearrange items in sorted positions
+        for index, (val, k) in enumerate(l):
+            tv.move(k, '', index)
+
+        # reverse sort next time
+        tv.heading(col, command=lambda: \
+                self.treeview_sort_column(tv, col, not reverse))
     
     def initButtons(self):
         # button logic
@@ -976,53 +1118,62 @@ class LibraryGUI:
         # present page
         self.labelCategoryInput.grid(row=0, column=0)
         self.filter_category.grid(row=1, column=0)
-        self.display_filter.grid(row=2, column=0)
-        self.display_category_papers.grid(row=2, column=1)
-        self.progress.grid(row=1, column=1)
+        self.progress.grid(row=1, column=2)
+
+        self.display_filter.grid(row=2, column=0, sticky=(N,W,E,S))
+        self.df_yscroll.grid(row=2, column=1, sticky=(N,S))
+        self.display_category_papers.grid(row=2, column=2)
 
         # add page
-        self.display_papers.grid(row=0, column=0, rowspan=13)
+        self.display_papers.grid(row=0, column=0, rowspan=15, sticky=(N,W,E,S))
+        self.dp_yscroll.grid(row=0, column=1, rowspan=15, sticky=(N,S))
 
-        self.labelBibInput.grid(row=0, column=1)
-        self.bib_parser_button.grid(row=0, column=2)
         self.reset_button.grid(row=0,column=3)
         self.serialize_button.grid(row=0,column=4)
-        self.add_bib_input.grid(row=1, column=1, columnspan=4)
+        self.reparse_button.grid(row=0, column=5)
 
-        self.labelTitleInput.grid(row=2,column=1)
-        self.add_title_input.grid(row=2,column=2, columnspan=3)
+        self.labelBibInput.grid(row=1, column=2)
+        self.bib_parser_button.grid(row=2, column=2)
+        self.add_bib_input.grid(row=1, column=3, columnspan=3, rowspan=2)
 
-        self.labelAuthorInput.grid(row=3,column=1)
-        self.add_author_input.grid(row=3,column=2, columnspan=3)
+        self.labelTitleInput.grid(row=3,column=2)
+        self.add_title_input.grid(row=3,column=3, columnspan=3)
+
+        self.labelAuthorInput.grid(row=4,column=2)
+        self.add_author_input.grid(row=4,column=3, columnspan=3)
         
-        self.labelPathInput.grid(row=4,column=1)
-        self.add_path_input.grid(row=4,column=2, columnspan=3)
+        self.labelPathInput.grid(row=5,column=2)
+        self.add_path_input.grid(row=5,column=3, columnspan=2)
+        self.path_button.grid(row=5, column=5)
 
-        self.labelTagInput.grid(row=5,column=1)
-        self.add_tag_input.grid(row=5,column=2, columnspan=3)
+        self.labelTagInput.grid(row=6,column=2)
+        self.add_tag_input.grid(row=6,column=3, columnspan=3)
 
-        self.labelProjectInput.grid(row=6,column=1)
-        self.add_project_input.grid(row=6,column=2, columnspan=3)
+        self.labelProjectInput.grid(row=7,column=2)
+        self.add_project_input.grid(row=7,column=3, columnspan=3)
 
-        self.labelDatasetInput.grid(row=7,column=1)
-        self.add_dataset_input.grid(row=7,column=2, columnspan=3)
+        self.labelDatasetInput.grid(row=8,column=2)
+        self.add_dataset_input.grid(row=8,column=3, columnspan=3)
 
-        self.labelCommentInput.grid(row=8,column=1)
-        self.add_comment_input.grid(row=8,column=2, columnspan=3)
+        self.labelCommentInput.grid(row=9,column=2)
+        self.add_comment_input.grid(row=9,column=3, columnspan=3)
         
-        self.labelConferenceInput.grid(row=9,column=1)
-        self.add_conference.grid(row=9,column=2, columnspan=3)
+        self.labelConferenceInput.grid(row=10,column=2)
+        self.add_conference.grid(row=10,column=3, columnspan=3)
 
-        self.labelYearInput.grid(row=10,column=1)
-        self.add_year_input.grid(row=10,column=2, columnspan=3)
+        self.labelYearInput.grid(row=11,column=2)
+        self.add_year_input.grid(row=11,column=3, columnspan=3)
 
-        self.read_check.grid(row=11,column=1,columnspan=2)
-        self.github_check.grid(row=11,column=3,columnspan=2)
+        self.labelRatingInput.grid(row=12,column=2)
+        self.add_rating_input.grid(row=12,column=3, columnspan=3)
 
-        self.add_button.grid(row=12,column=1)
-        self.revise_button.grid(row=12,column=2)
-        self.find_button.grid(row=12,column=3)
-        self.del_button.grid(row=12,column=4)
+        self.read_check.grid(row=13,column=2,columnspan=2)
+        self.github_check.grid(row=13,column=4,columnspan=2)
+
+        self.add_button.grid(row=14,column=2)
+        self.revise_button.grid(row=14,column=3)
+        self.find_button.grid(row=14,column=4)
+        self.del_button.grid(row=14,column=5)
     
     def serialize(self):
         f = open(lib_file, 'wb')
@@ -1040,7 +1191,7 @@ class LibraryGUI:
     def selectMode(self, paper_id):
         self.cur_paper = self.lib.papers[paper_id]
 
-        self.displayData(self.lib.papers[paper_id])
+        self.displayData(self.cur_paper)
 
         self.add_button.config(state=DISABLED)
         self.find_button.config(state=DISABLED)
@@ -1056,9 +1207,9 @@ class LibraryGUI:
 
         if paper_id in self.lib.papers:
             paper = self.lib.papers[paper_id]
-            self.display_papers.set(tree_id, column='title', value=paper.title)
-            self.display_papers.set(tree_id, column='conference', value=paper.conference)
-            self.display_papers.set(tree_id, column='year', value=paper.year)
+            values = self.display_columns_values(paper)
+            for i, col in enumerate(self.display_columns):
+                self.display_papers.set(tree_id, column=col, value=values[i])
         else:
             self.display_papers.delete(tree_id)
             del self.paper_to_tree[paper_id]
@@ -1103,18 +1254,22 @@ class LibraryGUI:
     def addPaper(self):
         self.cur_paper = self.collectInputData()
 
-        if not self.cur_paper.checkState():
-            messagebox.showinfo(message='Please input at least title, author, conference, year and path!')
+        if self.cur_paper.checkState() == 1:
+            messagebox.showinfo(message='Wrong path!')
+            return
+        elif self.cur_paper.checkState() == 2:
+            messagebox.showinfo(message='Please input at least title, author, conference, year!')
             return
 
-        paper_id = self.lib.searchDuplicatePaper(self.cur_paper.path)
+        # search the title and path
+        paper_id = self.lib.searchDuplicatePaper(self.cur_paper)
 
         if paper_id < 0:
             self.lib.addPaper(self.cur_paper)
             tree_id = self.displayPaper(self.cur_paper.id, self.display_papers)
             self.paper_to_tree[self.cur_paper.id] = tree_id
             self.addMode()
-        else:
+        elif messagebox.askokcancel("Repeated File Error!","Do you want to browse the other file?") :
             self.display_papers.selection_set(self.paper_to_tree[paper_id])
             self.selectMode(paper_id)
 
@@ -1138,20 +1293,44 @@ class LibraryGUI:
 
         self.cur_paper = self.collectInputData()
 
-        err = self.lib.revisePaper(target_paper_id, self.cur_paper)
+        if self.cur_paper.checkState() == 1:
+            messagebox.showinfo(message='Wrong path!')
+            return
+        elif self.cur_paper.checkState() == 2:
+            messagebox.showinfo(message='Please input at least title, author, conference, year!')
+            return
+
+        self.lib.revisePaper(target_paper_id, self.cur_paper)
         
-        if not err:
-            messagebox.showinfo(message='Revise paper data success!')
-            self.selectMode(target_paper_id)
-            self.updateMode(target_paper_id)
-        else:
-            self.cur_paper = self.lib.papers[target_paper_id]
-            messagebox.showinfo(message='File path not exists!')
+        messagebox.showinfo(message='Revise paper data success!')
+        self.selectMode(target_paper_id)
+        self.updateMode(target_paper_id)
     
     def parseBib(self):
-        bib_str = self.add_bib_input.get(1.0, END)
+        bib_str = self.add_bib_input.get(1.0, END).strip()
         b = bibParser.parse(bib_str, self.lib)
         self.displayBibData(b)
+
+    def reparse(self):
+        for paper_id in self.lib.papers:
+            paper = self.lib.papers[paper_id]
+            if len(paper.bib.bibtex) > 0 :
+                b = bibParser.parse(paper.bib.bibtex, self.lib)
+                self.lib.revisePaperBib(paper_id, b)
+
+                self.updateMode(paper_id)
+        messagebox.showinfo(message="Reparse each paper's bibtex success!")
+    
+    def browseFiles(self):
+        # Ask the user to select a single file name.
+        full_path = filedialog.askopenfilename(parent=self.add_page,
+                                    initialdir=os.getcwd(),
+                                    title="Please select a file:",
+                                    filetypes=my_filetypes)
+        if len(full_path) > 0:
+            path = os.path.relpath(full_path)
+            self.add_path_input.delete(0, 'end')
+            self.add_path_input.insert(0, path)
     
     # event
 
@@ -1161,24 +1340,23 @@ class LibraryGUI:
     def filterListing(self):
         self.clearFilter()
         self.clearCategoryPapers()
-
         filter_name = self.filter_category.get()
         
         if filter_name in self.filter_dict:
             filters = self.filter_dict[filter_name]
-            if filter_name == 'year':
+            if filter_name == 'year' or filter_name == 'rating':
                 for f in filters:
-                    self.display_filter.insert('', 'end', text=f)
+                    self.display_filter.insert(END, f)
             elif filter_name == 'conference':
                 for f in filters:
                     if f == filters[f].label:
-                        self.display_filter.insert('', 'end', text=f)
+                        self.display_filter.insert(END, f)
             else:
                 for f in filters:
-                    self.display_filter.insert('', 'end', text=f)
+                    self.display_filter.insert(END, f)
         elif filter_name == 'others':
-            self.display_filter.insert('', 'end', text='UnRead')
-            self.display_filter.insert('', 'end', text='hasGithub')
+            self.display_filter.insert(END, 'UnRead')
+            self.display_filter.insert(END, 'hasGithub')
 
     def selectItem(self, paper_tree):
         curItem = paper_tree.focus()
@@ -1194,38 +1372,42 @@ class LibraryGUI:
     def filteredPaper(self):
         self.clearCategoryPapers()
 
-        item = self.selectItem(self.display_filter)
-        
-        filter_name = self.filter_category.get()
+        idx = self.display_filter.curselection()
+        if idx is not None and len(idx) > 0:
+            item = self.display_filter.get(idx)
+            
+            filter_name = self.filter_category.get()
 
-        paper_ids = set()
-        if filter_name in self.filter_dict:
-            if filter_name == 'year':
-                paper_ids = self.lib.years[item]
-            elif filter_name == 'conference':
-                paper_ids = self.lib.conferences[item].papers
-            elif filter_name == 'author':
-                paper_ids = self.lib.authors[item].papers
-            elif filter_name == 'tag':
-                paper_ids = self.lib.tags[item].papers
-            elif filter_name == 'dataset':
-                paper_ids = self.lib.datasets[item].papers
-            elif filter_name == 'project':
-                paper_ids = self.lib.projects[item].papers
-        elif filter_name == 'others':
-            if item == 'UnRead':
-                paper_ids = self.lib.findUnread()
-            else:
-                paper_ids = self.lib.findGithub()
+            paper_ids = set()
+            if filter_name in self.filter_dict:
+                if filter_name == 'year':
+                    paper_ids = self.lib.years[item]
+                elif filter_name == 'rating':
+                    paper_ids = self.lib.ratings[item]
+                elif filter_name == 'conference':
+                    paper_ids = self.lib.conferences[item].papers
+                elif filter_name == 'author':
+                    paper_ids = self.lib.authors[item].papers
+                elif filter_name == 'tag':
+                    paper_ids = self.lib.tags[item].papers
+                elif filter_name == 'dataset':
+                    paper_ids = self.lib.datasets[item].papers
+                elif filter_name == 'project':
+                    paper_ids = self.lib.projects[item].papers
+            elif filter_name == 'others':
+                if item == 'UnRead':
+                    paper_ids = self.lib.findUnread()
+                else:
+                    paper_ids = self.lib.findGithub()
 
-        for pi in paper_ids:
-            self.displayPaper(pi, self.display_category_papers)
+            for pi in paper_ids:
+                self.displayPaper(pi, self.display_category_papers)
 
-        # show progress
-        total_num = len(paper_ids)
-        if total_num > 0:
-            unread_num = len( paper_ids & self.lib.findUnread())
-            self.setProgress(total_num-unread_num, total_num)
+            # show progress
+            total_num = len(paper_ids)
+            if total_num > 0:
+                unread_num = len( paper_ids & self.lib.findUnread())
+                self.setProgress(total_num-unread_num, total_num)
     
     def openCategoryPaperEvent(self, event):
         self.openCategoryPaper()
@@ -1265,7 +1447,9 @@ class LibraryGUI:
         return tmp_paper
     
     def collectBibData(self, paper):
-        paper.title = self.add_title_input.get()
+        paper.bibtex = self.add_bib_input.get(1.0, END).strip()
+        paper.type = bibParser.typeParser(paper.bibtex)
+        paper.title = self.add_title_input.get().strip()
         paper.year = self.add_year_input.get()
 
         paper.conference = self.lib.parseConference(self.add_conference.get())
@@ -1273,12 +1457,15 @@ class LibraryGUI:
         return paper
     
     def collectOtherData(self, paper):
-        paper.tag = self.lib.parseTags(self.add_tag_input.get())
-        paper.project = self.lib.parseProjects(self.add_project_input.get())
-        paper.dataset = self.lib.parseDatasets(self.add_dataset_input.get())
+        paper.tag = self.lib.parseTags(self.add_tag_input.get().strip())
+        paper.project = self.lib.parseProjects(self.add_project_input.get().strip())
+        paper.dataset = self.lib.parseDatasets(self.add_dataset_input.get().strip())
 
-        paper.comment = self.add_comment_input.get(1.0, END)
-        paper.path = self.add_path_input.get()
+        paper.comment = self.add_comment_input.get(1.0, END).strip()
+
+        paper.rating = self.add_rating_input.get()
+
+        paper.path = self.add_path_input.get().strip()
 
         paper.hasRead = self.hasRead.get()
         paper.hasGithub = self.hasGithub.get()
@@ -1288,7 +1475,7 @@ class LibraryGUI:
     
     def displayPaper(self, paper_id, tree_widget):
         tmp_paper = self.lib.papers[paper_id]
-        tree_id = tree_widget.insert('', 'end', text=paper_id, values=(tmp_paper.title, tmp_paper.conference, tmp_paper.year))
+        tree_id = tree_widget.insert('', 'end', text=paper_id, values=self.display_columns_values(tmp_paper))
         return tree_id
 
     def displayData(self, paper):
@@ -1297,8 +1484,8 @@ class LibraryGUI:
     
     def displayBibData(self, bib):
         self.clearBibData()
-
-        self.add_bib_input.insert(1.0, bib)
+        
+        self.add_bib_input.insert(1.0, bib.bibtex)
         self.add_title_input.insert(0, bib.title)
         self.add_author_input.insert(0, Author.guiString(bib.author))
         self.add_conference.current(bib.conference.index)
@@ -1312,7 +1499,7 @@ class LibraryGUI:
         self.add_project_input.insert(0, paper.project)
         self.add_dataset_input.insert(0, paper.dataset)
         self.add_comment_input.insert(1.0, paper.comment)
-
+        self.r_spinval.set(paper._rating)
         self.hasRead.set(paper.hasRead)
         self.hasGithub.set(paper.hasGithub)
     
@@ -1322,7 +1509,7 @@ class LibraryGUI:
         self.display_papers.delete(*self.display_papers.get_children())
 
     def clearFilter(self):
-        self.display_filter.delete(*self.display_filter.get_children())
+        self.display_filter.delete(0, END)
 
     def clearCategoryPapers(self):
         self.display_category_papers.delete(*self.display_category_papers.get_children())
@@ -1340,6 +1527,7 @@ class LibraryGUI:
         self.add_project_input.delete(0, 'end')
         self.add_dataset_input.delete(0, 'end')
         self.add_comment_input.delete(1.0, END)
+        self.r_spinval.set(0)
 
         self.hasGithub.set(False)
         self.hasRead.set(False)
