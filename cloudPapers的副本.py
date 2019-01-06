@@ -724,7 +724,7 @@ class Library:
         return -1
 
     # todo: better fuzzy comment
-    def findPaper(self, paper, target_paper_ids=None, support_fuzzy=False, fuzzy_window=0):
+    def findPaper(self, paper, support_fuzzy=False, fuzzy_window=0):
         
         title_papers = set()
         author_papers = set()
@@ -735,7 +735,7 @@ class Library:
         project_papers = set()
 
         if len(paper.title) > 0:
-            title_papers = self.findTitle(paper.title, target_paper_ids=target_paper_ids, support_fuzzy=support_fuzzy)
+            title_papers = self.findTitle(paper.title, support_fuzzy=support_fuzzy)
 
         if paper.conference != OTHERS_CONFERENCE:
             conferences = self.findConference(paper.conference, support_fuzzy=support_fuzzy)
@@ -780,8 +780,6 @@ class Library:
         
         tmp_papers, isAnd = self.combineTwoFindResults(tmp_papers, project_papers, isAnd, len(paper.project) > 0)
         
-        if target_paper_ids is not None:
-            tmp_papers =[pi for pi in tmp_papers if pi in target_paper_ids]
         return tmp_papers
     
     def combineTwoFindResults(self, papers1, papers2, isAnd1, isAnd2):
@@ -835,11 +833,9 @@ class Library:
         papers = [pi for pi in self.papers if self.papers[pi].hasGithub]
         return set(papers)
 
-    def findTitle(self, t_str, target_paper_ids=None, support_fuzzy=False):
+    def findTitle(self, t_str, support_fuzzy=False):
         papers = set()
-        if target_paper_ids is None:
-            target_paper_ids = self._papers
-        for pi in target_paper_ids:
+        for pi in self._papers:
             if self.similarity(t_str, self._papers[pi].title, support_fuzzy=support_fuzzy):
                 papers.add(pi)
         return papers
@@ -891,93 +887,103 @@ class LibraryGUI:
         # gui style
         self.display_column_width = {'Title':300, 'Conference':100, 'Year':50, 'Read':50, 'Rating':50}
         self.fontSize = 14
-        self.textfontSize = 12
         self.headFontSize = 12
-        self.cellWidth = 6
+        self.grid_width = 1
 
         # gui
         self.root = Tk()
         self.root.title("Cloud Paper Manager")
         self.root.resizable(width=False, height=False)
+        self.pages = ttk.Notebook(self.root)
 
-        self.main_frame = ttk.Frame(self.root)
+        # add and revise
+        self.add_page = ttk.Frame(self.pages)
 
-        # filter
-
-        self.labelCategoryInput = ttk.Label(self.main_frame, text='FilterBy:')
-        categories = StringVar()
-        self.filter_category = ttk.Combobox(self.main_frame, textvariable=categories, width=int(1.7*self.cellWidth))
-
-        self.display_filter = Listbox(self.main_frame, width=int(1.7*self.cellWidth))  # lists of existing filters
-        self.df_yscroll = ttk.Scrollbar(self.main_frame, command=self.display_filter.yview, orient=VERTICAL)
-        self.display_filter.configure(yscrollcommand=self.df_yscroll.set)
-
-        self.progress = ttk.Progressbar(self.main_frame, orient=HORIZONTAL, length=int(10*self.cellWidth), mode='determinate')
-
-        # display paper
-        self.display_papers = ttk.Treeview(self.main_frame)  # lists of existing papers
-        self.dp_yscroll = ttk.Scrollbar(self.main_frame, command=self.display_papers.yview, orient=VERTICAL)
+        self.display_papers = ttk.Treeview(self.add_page)  # lists of existing papers
+        self.dp_yscroll = ttk.Scrollbar(self.add_page, command=self.display_papers.yview, orient=VERTICAL)
         self.display_papers.configure(yscrollcommand=self.dp_yscroll.set)
 
         # bibtex parser
-        self.labelBibInput = ttk.Label(self.main_frame, text='Bibtex:')
-        self.add_bib_input = Text(self.main_frame, height=5, width=4*self.cellWidth)
+        self.labelBibInput = ttk.Label(self.add_page, text='Bibtex:')
+        self.add_bib_input = Text(self.add_page, height=5)
         self.add_bib_input.bind("<Tab>", self.focus_next_widget)
-        self.bib_parser_button = ttk.Button(self.main_frame, command = self.parseBib, text = "Parse", width=int(0.8*self.cellWidth))
+        self.bib_parser_button = ttk.Button(self.add_page, command = self.parseBib, text = "Parse")
 
-        self.labelTitleInput = ttk.Label(self.main_frame, text='Title:')
-        self.add_title_input = ttk.Entry(self.main_frame, width=4*self.cellWidth)
+        self.labelTitleInput = ttk.Label(self.add_page, text='Title:')
+        self.add_title_input = ttk.Entry(self.add_page)
 
-        self.labelAuthorInput = ttk.Label(self.main_frame, text='Authors:')
-        self.add_author_input = ttk.Entry(self.main_frame, width=4*self.cellWidth)
+        self.labelAuthorInput = ttk.Label(self.add_page, text='Authors:')
+        self.add_author_input = ttk.Entry(self.add_page)
 
-        self.labelConferenceInput = ttk.Label(self.main_frame, text='Conference:')
-        conferences = StringVar()
-        self.add_conference = ttk.Combobox(self.main_frame, textvariable=conferences, width=int(1.7*self.cellWidth))
-        
-        self.labelYearInput = ttk.Label(self.main_frame, text='Year:')
-        self.spinval = StringVar()
-        self.add_year_input = Spinbox(self.main_frame, from_=DEFAULT_YEAR, to=datetime.datetime.now().year, textvariable=self.spinval, width=self.cellWidth)
+        self.labelPathInput = ttk.Label(self.add_page, text='Path:')
+        self.add_path_input = ttk.Entry(self.add_page)
 
-        self.labelPathInput = ttk.Label(self.main_frame, text='Path:')
-        self.add_path_input = ttk.Entry(self.main_frame, width=3*self.cellWidth)
+        self.path_button = ttk.Button(self.add_page, command = self.browseFiles, text = "...")
 
-        self.path_button = ttk.Button(self.main_frame, command = self.browseFiles, text = "...", width=int(0.8*self.cellWidth))
+        self.labelTagInput = ttk.Label(self.add_page, text='Tags:')
+        self.add_tag_input = ttk.Entry(self.add_page)
 
-        self.labelTagInput = ttk.Label(self.main_frame, text='Tags:')
-        self.add_tag_input = ttk.Entry(self.main_frame, width=4*self.cellWidth)
+        self.labelProjectInput = ttk.Label(self.add_page, text='Projects:')
+        self.add_project_input = ttk.Entry(self.add_page)
 
-        self.labelProjectInput = ttk.Label(self.main_frame, text='Projects:')
-        self.add_project_input = ttk.Entry(self.main_frame, width=4*self.cellWidth)
+        self.labelDatasetInput = ttk.Label(self.add_page, text='Datasets:')
+        self.add_dataset_input = ttk.Entry(self.add_page)
 
-        self.labelDatasetInput = ttk.Label(self.main_frame, text='Datasets:')
-        self.add_dataset_input = ttk.Entry(self.main_frame, width=4*self.cellWidth)
-
-        self.labelCommentInput = ttk.Label(self.main_frame, text='Comments:')
-        self.add_comment_input = Text(self.main_frame, height=3, width=4*self.cellWidth)
+        self.labelCommentInput = ttk.Label(self.add_page, text='Comments:')
+        self.add_comment_input = Text(self.add_page, height=5)
         self.add_comment_input.bind("<Tab>", self.focus_next_widget)
 
-        self.labelRatingInput = ttk.Label(self.main_frame, text='Rating:')
+        self.labelConferenceInput = ttk.Label(self.add_page, text='Conference:')
+        conferences = StringVar()
+        self.add_conference = ttk.Combobox(self.add_page, textvariable=conferences, width=2*self.grid_width)
+        
+        self.labelYearInput = ttk.Label(self.add_page, text='Year:')
+        self.spinval = StringVar()
+        self.add_year_input = Spinbox(self.add_page, from_=DEFAULT_YEAR, to=datetime.datetime.now().year, textvariable=self.spinval, width=self.grid_width)
+
+        self.labelRatingInput = ttk.Label(self.add_page, text='Rating:')
         self.r_spinval = StringVar()
-        self.add_rating_input = Spinbox(self.main_frame, from_=0, to=MAX_RATING, textvariable=self.r_spinval,width=self.cellWidth)
+        self.add_rating_input = Spinbox(self.add_page, from_=0, to=MAX_RATING, textvariable=self.r_spinval, width=self.grid_width)
 
         self.hasRead = BooleanVar()
-        self.read_check = ttk.Checkbutton(self.main_frame, text='Read', variable=self.hasRead,
-	    onvalue=True, offvalue=False, width=self.cellWidth)
+        self.read_check = ttk.Checkbutton(self.add_page, text='Read', variable=self.hasRead,
+	    onvalue=True, offvalue=False)
 
         self.hasGithub = BooleanVar()
-        self.github_check = ttk.Checkbutton(self.main_frame, text='Github', variable=self.hasGithub,
-	    onvalue=True, offvalue=False, width=self.cellWidth)
+        self.github_check = ttk.Checkbutton(self.add_page, text='Github', variable=self.hasGithub,
+	    onvalue=True, offvalue=False)
 
-        self.add_button = ttk.Button(self.main_frame, command = self.addPaper, text = "Add", width=int(0.8*self.cellWidth))
-        self.del_button = ttk.Button(self.main_frame, command = self.delPaper, text = "Del", width=int(0.8*self.cellWidth))
-        self.revise_button = ttk.Button(self.main_frame, command = self.revisePaper, text = "Edit", width=int(0.8*self.cellWidth))
-        self.find_button = ttk.Button(self.main_frame, command = self.findPaper, text = "Find", width=int(0.8*self.cellWidth))
+        self.add_button = ttk.Button(self.add_page, command = self.addPaper, text = "Add")
+        self.del_button = ttk.Button(self.add_page, command = self.delPaper, text = "Remove")
+        self.revise_button = ttk.Button(self.add_page, command = self.revisePaper, text = "Revise")
+        self.find_button = ttk.Button(self.add_page, command = self.findPaper, text = "Find")
 
-        self.reset_button = ttk.Button(self.main_frame, command = self.resetMode, text = "Reset", width=int(0.8*self.cellWidth))
-        self.serialize_button = ttk.Button(self.main_frame, command = self.serialize, text = "Sync", width=int(0.8*self.cellWidth))
+        self.reset_button = ttk.Button(self.add_page, command = self.resetMode, text = "Reset")
+        self.serialize_button = ttk.Button(self.add_page, command = self.serialize, text = "Sync")
 
-        self.reparse_button = ttk.Button(self.main_frame, command = self.reparse, text = "Renew", width=int(0.9*self.cellWidth))
+        self.reparse_button = ttk.Button(self.add_page, command = self.reparse, text = "RedoALL")
+
+        self.bib_separator = ttk.Separator(self.add_page, orient=HORIZONTAL)
+        self.data_separator = ttk.Separator(self.add_page, orient=HORIZONTAL)
+
+        # present
+        self.present_page = ttk.Frame(self.pages)
+
+        self.labelCategoryInput = ttk.Label(self.present_page, text='FilterBy:')
+        categories = StringVar()
+        self.filter_category = ttk.Combobox(self.present_page, textvariable=categories, width=10)
+
+        self.display_filter = Listbox(self.present_page, height=5)  # lists of existing filters
+        self.df_yscroll = ttk.Scrollbar(self.present_page, command=self.display_filter.yview, orient=VERTICAL)
+        self.display_filter.configure(yscrollcommand=self.df_yscroll.set)
+
+        self.display_category_papers = ttk.Treeview(self.present_page)  # lists of filtered papers
+
+        self.progress = ttk.Progressbar(self.present_page, orient=HORIZONTAL, length=200, mode='determinate')
+
+        # add pages
+        self.pages.add(self.add_page, text="Add")
+        self.pages.add(self.present_page, text="Present")
 
     def focus_next_widget(self, event):
         event.widget.tk_focusNext().focus()
@@ -986,6 +992,7 @@ class LibraryGUI:
     def init(self):
         self.initLib()
         self.initConference(conference_file)
+        self.initPresentPage()
         self.initAddPage()
         self.initButtons()
         self.initStyle()
@@ -999,19 +1006,23 @@ class LibraryGUI:
         text_font.configure(size=self.fontSize)
 
         text_font = tkfont.nametofont('TkFixedFont')
-        text_font.configure(size=self.textfontSize)
+        text_font.configure(size=self.fontSize)
 
         text_font = tkfont.nametofont('TkHeadingFont')
         text_font.configure(size=self.headFontSize)
+        # color
+        # bg = self.add_page['bg']
+        # self.labelBibInput.config(bg=bg)
+
     
     def initLib(self):
         # load existing papers
         self.deserialize()
-        for pi in self.lib.papers:
-            self.displayPaper(pi)
-
-    def initAddPage(self):
-        # filter
+        for p in self.lib.papers:
+            tree_id = self.displayPaper(p, self.display_papers)
+            self.paper_to_tree[p] = tree_id
+    
+    def initPresentPage(self):
         self.filter_dict = {'conference':self.lib.conferences, 'year':self.lib.years, 'author':self.lib.authors, 'dataset':self.lib.datasets, 'tag':self.lib.tags, 'project':self.lib.projects, 'rating':self.lib.ratings}
         self.filter_category['value'] = ['please select'] + list(self.filter_dict.keys()) + ['others']
         self.filter_category['state'] = "readonly"
@@ -1019,8 +1030,18 @@ class LibraryGUI:
         self.filter_category.bind('<<ComboboxSelected>>', self.filterListingEvent)
 
         self.display_filter.bind("<<ListboxSelect>>", self.filteredPaperEvent)
+        
+        self.display_category_papers['columns'] = self.display_columns
+        #hide #0 column for id
+        self.display_category_papers['show'] = 'headings'
+        # sort column
+        for col in self.display_columns:
+            self.display_category_papers.heading(col, text=col, command=lambda _col=col: \
+                     self.treeview_sort_column(self.display_category_papers, _col, False))
+            self.display_category_papers.column(col, width=self.display_column_width[col], anchor='center')
+        self.display_category_papers.bind("<Double-1>", self.openCategoryPaperEvent)
 
-        # display paper
+    def initAddPage(self):
         self.display_papers['columns'] = self.display_columns
         # self.display_papers.heading('#0', text='Title')
         # hide #0 column
@@ -1084,74 +1105,79 @@ class LibraryGUI:
 
     # finish gui arrange
     def gui_arrang(self):
-        padding = 10
+        self.pages.grid()
+        # present page
+        # self.labelCategoryInput.grid(row=0, column=0, sticky=E)
+        # self.filter_category.grid(row=0, column=1, sticky=(W,E))
+        # self.progress.grid(row=0, column=3, sticky=W)
 
-        self.main_frame.grid()
-        # filter
-        self.labelCategoryInput.grid(row=0, column=0, padx=(padding,0), pady=(padding,0), sticky=E)
-        self.filter_category.grid(row=1, column=0, columnspan=2, padx=(padding,0), sticky=(W,E))
-        self.progress.grid(row=0, column=1, pady=(padding,0), sticky=(W,S,E))
+        # self.display_filter.grid(row=1, column=0, columnspan=2, rowspan=14, sticky=(N,W,E,S))
+        # self.df_yscroll.grid(row=1, column=2, rowspan=14, sticky=(N,W,S))
+        # self.display_category_papers.grid(row=1, column=3, columnspan=8, rowspan=14, sticky=(N,W,E,S))
 
-        self.display_filter.grid(row=2, column=0, columnspan=2, rowspan=17, padx=(padding,0), pady=(0,padding), sticky=(N,W,E,S))
-        self.df_yscroll.grid(row=2, column=2, rowspan=17, pady=(0,padding), sticky=(N,W,S))
+        # add page 7 columns, 15 rows
+        # self.add_page.grid_propagate(0)
 
-        # display papers 19 columns, 13 rows
-
-        self.display_papers.grid(row=0, column=3, columnspan=5, rowspan=19, pady=(padding,padding), sticky=(N,W,E,S))
-        self.dp_yscroll.grid(row=0, column=8, rowspan=19, pady=(padding,padding), sticky=(N,W,S))
+        # main display paper table
+        self.display_papers.grid(row=0, column=0, columnspan=4, rowspan=15, sticky=(N,W,E,S))
+        self.dp_yscroll.grid(row=0, column=5, rowspan=15, sticky=(N,S))
 
         # global buttons
 
-        self.reset_button.grid(row=0,column=11)
-        self.serialize_button.grid(row=0,column=12)
-        self.reparse_button.grid(row=0, column=13, padx=(0, padding))
+        self.reset_button.grid(row=0,column=8, sticky=(W,E))
+        self.serialize_button.grid(row=0,column=9, sticky=(W,E))
+        self.reparse_button.grid(row=0, column=10, sticky=(W,E))
+
+        # self.data_separator.grid(row=1, column=2, columnspan=4, sticky=(N, W, E))
 
         # paper bib data
 
-        self.labelBibInput.grid(row=1, column=9, sticky=E)
-        self.add_bib_input.grid(row=1, column=10, columnspan=4, rowspan=5, padx=(0, padding), sticky=(W,E))
-        self.bib_parser_button.grid(row=6, column=13, padx=(0, padding), sticky=(W,E))
+        self.labelBibInput.grid(row=1, column=6, sticky=(N,E))
+        self.add_bib_input.grid(row=1, column=7, columnspan=4, rowspan=2, sticky=(W,E))
+        self.bib_parser_button.grid(row=3, column=10, sticky=(W,E))
 
-        self.labelTitleInput.grid(row=7,column=9, sticky=E)
-        self.add_title_input.grid(row=7,column=10, columnspan=4, padx=(0, padding), sticky=(W,E))
+        self.labelTitleInput.grid(row=4,column=6, sticky=E)
+        self.add_title_input.grid(row=4,column=7, columnspan=4, sticky=(W,E))
 
-        self.labelAuthorInput.grid(row=8,column=9, sticky=E)
-        self.add_author_input.grid(row=8,column=10, columnspan=4, padx=(0, padding), sticky=(W,E))
+        self.labelAuthorInput.grid(row=5,column=6, sticky=E)
+        self.add_author_input.grid(row=5,column=7, columnspan=4, sticky=(W,E))
 
-        self.labelConferenceInput.grid(row=9,column=9, sticky=E)
-        self.add_conference.grid(row=9,column=10, columnspan=2, sticky=W)
+        self.labelConferenceInput.grid(row=6,column=6, sticky=E)
+        self.add_conference.grid(row=6,column=7, columnspan=2, sticky=(W,E))
 
-        self.labelYearInput.grid(row=9,column=12, sticky=E)
-        self.add_year_input.grid(row=9,column=13, padx=(0, padding), sticky=W)
+        self.labelYearInput.grid(row=6,column=9, sticky=E)
+        self.add_year_input.grid(row=6,column=10, sticky=(W,E))
         
-        self.labelPathInput.grid(row=10,column=9, sticky=E)
-        self.add_path_input.grid(row=10,column=10, columnspan=3, sticky=(W,E))
-        self.path_button.grid(row=10, column=13, padx=(0, padding), sticky=(W,E))
+        self.labelPathInput.grid(row=7,column=6, sticky=E)
+        self.add_path_input.grid(row=7,column=7, columnspan=3, sticky=(W,E))
+        self.path_button.grid(row=7, column=10, sticky=(W,E))
+
+        self.bib_separator.grid(row=8, column=6, columnspan=5, sticky=(N, W, E))
 
         # paper optional data
 
-        self.labelTagInput.grid(row=11,column=9, sticky=E)
-        self.add_tag_input.grid(row=11,column=10, columnspan=4, padx=(0, padding), sticky=(W,E))
+        self.labelTagInput.grid(row=9,column=6, sticky=E)
+        self.add_tag_input.grid(row=9,column=7, columnspan=4, sticky=(W,E))
 
-        self.labelProjectInput.grid(row=12,column=9, sticky=E)
-        self.add_project_input.grid(row=12,column=10, columnspan=4, padx=(0, padding), sticky=(W,E))
+        self.labelProjectInput.grid(row=10,column=6, sticky=E)
+        self.add_project_input.grid(row=10,column=7, columnspan=4, sticky=(W,E))
 
-        self.labelDatasetInput.grid(row=13,column=9, sticky=E)
-        self.add_dataset_input.grid(row=13,column=10, columnspan=4, padx=(0, padding), sticky=(W,E))
+        self.labelDatasetInput.grid(row=11,column=6, sticky=E)
+        self.add_dataset_input.grid(row=11,column=7, columnspan=4, sticky=(W,E))
 
-        self.labelCommentInput.grid(row=14,column=9, sticky=(N,E))
-        self.add_comment_input.grid(row=14,column=10, columnspan=4, rowspan=3, padx=(0, padding), sticky=(W,E))
+        self.labelCommentInput.grid(row=12,column=6, sticky=(N,E))
+        self.add_comment_input.grid(row=12,column=7, columnspan=4, sticky=(W,E))
 
-        self.labelRatingInput.grid(row=17,column=9, sticky=E)
-        self.add_rating_input.grid(row=17,column=10, sticky=W)
+        self.labelRatingInput.grid(row=13,column=6, sticky=E)
+        self.add_rating_input.grid(row=13,column=7, sticky=(W,E))
 
-        self.read_check.grid(row=17,column=11, sticky=(W,E))
-        self.github_check.grid(row=17,column=12, sticky=(W,E))
+        self.read_check.grid(row=13,column=9, sticky=(W,E))
+        self.github_check.grid(row=13,column=10, sticky=(W,E))
 
-        self.add_button.grid(row=18,column=10, pady=(0, padding))
-        self.revise_button.grid(row=18,column=11, pady=(0, padding))
-        self.find_button.grid(row=18,column=12, pady=(0, padding))
-        self.del_button.grid(row=18,column=13, padx=(0, padding), pady=(0, padding))
+        self.add_button.grid(row=14,column=7, sticky=(W,E))
+        self.revise_button.grid(row=14,column=8, sticky=(W,E))
+        self.find_button.grid(row=14,column=9, sticky=(W,E))
+        self.del_button.grid(row=14,column=10, sticky=(W,E))
     
     def serialize(self):
         f = open(lib_file, 'wb')
@@ -1180,15 +1206,6 @@ class LibraryGUI:
         self.resetMode()
         self.serializeMode()
     
-    def filterMode(self):
-        self.clearBibData()
-        self.clearOtherData()
-
-        self.add_button.config(state=DISABLED)
-        self.revise_button.config(state=DISABLED)
-        self.del_button.config(state=DISABLED)
-        self.find_button.config(state=NORMAL)
-    
     def updateMode(self, paper_id):
         tree_id = self.paper_to_tree[paper_id]
 
@@ -1202,6 +1219,8 @@ class LibraryGUI:
             del self.paper_to_tree[paper_id]
 
         self.filterListing()
+        self.clearCategoryPapers()
+
         self.serializeMode()
     
     def resetMode(self):
@@ -1211,13 +1230,16 @@ class LibraryGUI:
         self.clearBibData()
         self.clearOtherData()
 
+        self.paper_to_tree.clear()
         self.clearDisplayPapers()
         for pi in self.lib.papers:
-            self.displayPaper(pi)
+            tree_id = self.displayPaper(pi, self.display_papers)
+            self.paper_to_tree[pi] = tree_id
 
         # present page
         self.filter_category.current(0)
         self.clearFilter()
+        self.clearCategoryPapers()
 
         self.revise_button.config(state=DISABLED)
         self.del_button.config(state=DISABLED)
@@ -1248,7 +1270,8 @@ class LibraryGUI:
 
         if paper_id < 0:
             self.lib.addPaper(self.cur_paper)
-            self.displayPaper(self.cur_paper.id)
+            tree_id = self.displayPaper(self.cur_paper.id, self.display_papers)
+            self.paper_to_tree[self.cur_paper.id] = tree_id
             self.addMode()
         elif messagebox.askokcancel("Repeated File Error!","Do you want to browse the other file?") :
             self.display_papers.selection_set(self.paper_to_tree[paper_id])
@@ -1264,15 +1287,10 @@ class LibraryGUI:
         self.cur_paper = Paper()
         self.cur_paper = self.collectInputData()
 
-        paper_ids = self.lib.findPaper(self.cur_paper, target_paper_ids=self.paper_to_tree, support_fuzzy=True, fuzzy_window=2)
-
-        if len(paper_ids) < 1:
-            messagebox.showinfo(message='Find nothing!')
-            return
-
-        self.clearDisplayPapers()
+        self.display_papers.delete(*self.display_papers.get_children())
+        paper_ids = self.lib.findPaper(self.cur_paper, support_fuzzy=True, fuzzy_window=2)
         for pi in paper_ids:
-            self.displayPaper(pi)
+            self.displayPaper(pi, self.display_papers)
     
     def revisePaper(self):
         target_paper_id = self.cur_paper.id
@@ -1298,19 +1316,18 @@ class LibraryGUI:
         self.displayBibData(b)
 
     def reparse(self):
-        if messagebox.askokcancel("ReNewal","Do you want to re-Parse bibtex for all papers?") :
-            for paper_id in self.lib.papers:
-                paper = self.lib.papers[paper_id]
-                if len(paper.bib.bibtex) > 0 :
-                    b = bibParser.parse(paper.bib.bibtex, self.lib)
-                    self.lib.revisePaperBib(paper_id, b)
+        for paper_id in self.lib.papers:
+            paper = self.lib.papers[paper_id]
+            if len(paper.bib.bibtex) > 0 :
+                b = bibParser.parse(paper.bib.bibtex, self.lib)
+                self.lib.revisePaperBib(paper_id, b)
 
-            self.addMode()
-            messagebox.showinfo(message="Reparse each paper's bibtex success!")
+                self.updateMode(paper_id)
+        messagebox.showinfo(message="Reparse each paper's bibtex success!")
     
     def browseFiles(self):
         # Ask the user to select a single file name.
-        full_path = filedialog.askopenfilename(parent=self.root,
+        full_path = filedialog.askopenfilename(parent=self.add_page,
                                     initialdir=os.getcwd(),
                                     title="Please select a file:",
                                     filetypes=my_filetypes)
@@ -1327,6 +1344,7 @@ class LibraryGUI:
 
     def filterListing(self):
         self.clearFilter()
+        self.clearCategoryPapers()
         filter_name = self.filter_category.get()
         
         if filter_name in self.filter_dict:
@@ -1344,7 +1362,6 @@ class LibraryGUI:
         elif filter_name == 'others':
             self.display_filter.insert(END, 'UnRead')
             self.display_filter.insert(END, 'hasGithub')
-        else: self.resetMode()
 
     def selectItem(self, paper_tree):
         curItem = paper_tree.focus()
@@ -1358,9 +1375,10 @@ class LibraryGUI:
         self.filteredPaper()
 
     def filteredPaper(self):
+        self.clearCategoryPapers()
+
         idx = self.display_filter.curselection()
         if idx is not None and len(idx) > 0:
-            self.clearDisplayPapers()
             item = self.display_filter.get(idx)
             
             filter_name = self.filter_category.get()
@@ -1388,14 +1406,22 @@ class LibraryGUI:
                     paper_ids = self.lib.findGithub()
 
             for pi in paper_ids:
-                self.displayPaper(pi)
+                self.displayPaper(pi, self.display_category_papers)
 
             # show progress
             total_num = len(paper_ids)
             if total_num > 0:
                 unread_num = len( paper_ids & self.lib.findUnread())
                 self.setProgress(total_num-unread_num, total_num)
-            self.filterMode()
+    
+    def openCategoryPaperEvent(self, event):
+        self.openCategoryPaper()
+
+    def openCategoryPaper(self):
+        paper_id = self.selectItem(self.display_category_papers)
+        self.pages.select(self.add_page)
+
+        self.selectMode(paper_id)
 
     def selectPaperEvent(self, event):
         paper_id = self.selectItem(self.display_papers)
@@ -1453,10 +1479,9 @@ class LibraryGUI:
     
     # display data
     
-    def displayPaper(self, paper_id):
+    def displayPaper(self, paper_id, tree_widget):
         tmp_paper = self.lib.papers[paper_id]
-        tree_id = self.display_papers.insert('', 'end', text=paper_id, values=self.display_columns_values(tmp_paper))
-        self.paper_to_tree[paper_id] = tree_id
+        tree_id = tree_widget.insert('', 'end', text=paper_id, values=self.display_columns_values(tmp_paper))
         return tree_id
 
     def displayData(self, paper):
@@ -1487,12 +1512,13 @@ class LibraryGUI:
     # clear data
     
     def clearDisplayPapers(self):
-        self.paper_to_tree.clear()
         self.display_papers.delete(*self.display_papers.get_children())
 
     def clearFilter(self):
         self.display_filter.delete(0, END)
-        self.setProgress(0,1)
+
+    def clearCategoryPapers(self):
+        self.display_category_papers.delete(*self.display_category_papers.get_children())
 
     def clearBibData(self):
         self.add_bib_input.delete(1.0, END)
