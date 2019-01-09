@@ -1,0 +1,18 @@
+馨茹，domain specific el system。阿里。****
+成江，实验基本完成，which target conference。
+    之前扩展emnlp15工作的idea，挺可惜的，现在fintech那边要找人做。
+学宽，挺认真，调整实验，which conference。
+王帅，不听劝，intro问题。
+吕鑫，kg reasoning。
+
+我自己，
+这礼拜完成专利。回头发给张老师？
+这几个月带紫昆做domain specific ner，可以加到馨茹system里。
+和xiang wang 完成一个aaai。
+和向南完成一个www。kg 补全和recommendation结合。
+之后加推理。 ****
+之后acl，domain specific joint ner+el，还是 iterative joint learning。
+是不是可以在bert基础上加上知识库进行预训练。 ****
+大方向上，和刘老师聊了一下，domain adaption for general purpose kg。 **rdfs premier 事件图**
+    跟chua汇报了一下，看到您的ppt了。
+    以xlore为核心，拓展健康领域。找谁拿一下toxonomy？之后从xlore拿数据吧。和谁对接？吕鑫和成江拿数据
