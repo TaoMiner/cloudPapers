@@ -1,6 +1,8 @@
 # Cloud Paper Manager
 
-Cloud paper manager is a lightweight research paper management tool across computers, and even across platforms (i.e., Mac, Linux and Windows). You can use any cloud storage service (e.g., dropbox) to synchronize the folder including papers as well as the cloudPaper program, and it will work perfectly as long as the relative paths remains consistent across computers. CloudPaper uses the default python3 packages only, so that you don't need to install additinal packages and deploy the environment.
+Cloud paper manager is a lightweight research paper management tool across computers, and even across platforms (i.e., Mac, Linux and Windows). You can use any cloud storage service (e.g., dropbox) to synchronize the folder including papers as well as the cloudPaper program, and it will work perfectly as long as the relative paths remains consistent across computers.
+
+CloudPaper uses the default python3 packages only, so that you don't need to install additinal packages and deploy the environment. It manages the papers using it own library system, which can also be synchronized into the current folder, supporting different platforms.
 
 ## How to Run
 1. Directly use python to run the cloudPapers.py file by entering the follwing command line in shell:
@@ -28,12 +30,11 @@ CloudPaper shall support Mac OS, Linux and Windows whatever the python version (
 or running the packaged program.
 
 ## Interface
+There are three areas: Filter (left), Display papers (middle), and Paper Information (right). Each paper in the library has a path linked to a local file, and the bib information required including title, author, conference and year. Also, it can be futher distinguished via optional information (e.g., tags). These papers will be also linked by these information if they share the common information.
 
 ![Interface Demo](./demo.png)
 
 ## Function
-
-There are three areas: Filter (left), Display papers (middle), and Paper Information (right).
 
 ### Filter
 Filter the papers displayed in the display papers area. support conference, year, author, dataset, tag, project, rating, and others (unread, hasGithub, and needRevise).
