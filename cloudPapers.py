@@ -78,11 +78,11 @@ class Category:
     def __repr__(self):
         return self.label
 
-author_format_re = re.compile(r'^(.+?),(.+?);(.*)')
-author_format1_re = re.compile(r'^(.+?),(.+?) and (.*)')
+author_format_re = re.compile(r'^(.+?)[, ](.+?);(.*)')
+author_format1_re = re.compile(r'^(.+?)[, ](.+?) and (.*)')
 class Author(Category):
     def __init__(self, label):
-        self.last_name, self.first_name = self.nameParse(label)
+        self.first_name, self.last_name = self.nameParse(label)
         self.label = self.getFullname(self.first_name, self.last_name)
         self.papers = set()
 
@@ -95,18 +95,23 @@ class Author(Category):
     
     @classmethod
     def nameParse(cls, full_name):
+        reverse=True if ',' in full_name else False
+
         tmp_names = re.split(',| ', full_name.strip())
         names = []
         for n in tmp_names:
             if len(n.strip()) > 0:
                 names.append(n.strip())
-        first_name = ""
-        last_name = ""
+        name1 = ""
+        name2 = ""
         if len(names) > 0:
-            last_name = names[0]
+            name1 = names[0]
         if len(names) > 1 :
-            first_name = names[-1]
-        return last_name, first_name
+            name2 = names[-1]
+        if reverse:
+            return name2, name1
+        else:
+            return name1, name2
 
     @classmethod
     def parseFormat1(cls, author_str):
@@ -122,7 +127,8 @@ class Author(Category):
     def parseAuthorString(cls, author_str):
         m = author_format_re.match(author_str)
         m1 = author_format1_re.match(author_str)
-        if m:
+
+        if m :
             items = cls.parse(author_str)
         elif m1:
             items = cls.parseFormat1(author_str)
@@ -548,7 +554,7 @@ class Paper(object):
         state = 0
         if self._path == "" :
             state = 1
-        elif self.title == "" or self.author == "" or self.conference == "" or self.year == "" :
+        elif self.title == "" or self.author == "" or self.conference == OTHERS_CONFERENCE or self.year == str(DEFAULT_YEAR) :
             state = 2
         return state
 
@@ -757,7 +763,7 @@ class Library:
             self.addPaperYear(paper_id, bib.year)
             target_paper.bib.year = bib.year
             hasRevised = True
-
+        
         if target_paper.conference != bib.conference.label:
             target_paper.bib.conference.papers.remove(paper_id)
             target_paper.bib.conference = bib.conference
@@ -1042,13 +1048,16 @@ class MyDialog(Toplevel):
         self.wait_window()
         return self.re
 
+FILTER_BOX = 0
+PAPER_TREE = 1
 class LibraryGUI:
 
     def __init__(self):
         self.lib = Library()
         self.cur_paper = Paper()
+        # store the current selection idx of display_filter Listbox
+        self.cur_filter_index = -1
         self.paper_to_tree = {}
-        self.authorize_conference_list = []
         self.removed_files = []
 
         self.display_columns = ('Title', 'Conference', 'Year', 'Read', 'Rating')
@@ -1066,6 +1075,9 @@ class LibraryGUI:
         self.root.title("Cloud Paper Manager")
         self.root.minsize(width=1280, height= 650)
         # self.root.resizable(width=False, height=False)
+
+        style = ttk.Style(self.root)
+        style.configure('Treeview', rowheight=30)
 
         self.filter_frame = ttk.Frame(self.root)
         self.display_frame = ttk.Frame(self.root)
@@ -1196,9 +1208,14 @@ class LibraryGUI:
         self.displayPaper(self.lib.papers)
 
         self.other_filter_set = {'unRead': self.lib.findUnread, 'hasGithub': self.lib.findGithub, 'needRevise':self.lib.findToRevise}
+        self.other_inputs = {'unRead': self.hasRead, 'hasGithub': self.hasGithub}
 
-        self.filter_dict = {'conference': self.lib.conferences, 'year':self.lib.years, 'author':self.lib.authors, 'dataset':self.lib.datasets, 'tag':self.lib.tags, 'project':self.lib.projects, 'rating':self.lib.ratings, 'others': self.other_filter_set}
-        self.filter_type_list = list(self.filter_dict.keys())
+        self.filter_dict = {'conference': (self.lib.conferences, self.add_conference), 'year':(self.lib.years,self.spinval), 'author':(self.lib.authors,self.add_author_input), 'dataset':(self.lib.datasets,self.add_dataset_input), 'tag':(self.lib.tags,self.add_tag_input), 'project':(self.lib.projects,self.add_project_input), 'rating':(self.lib.ratings,self.r_spinval), 'others': (self.other_filter_set, self.other_inputs)}
+
+        self.filter_type_list = list([k for k in self.filter_dict if k != 'others'])
+        self.filter_type_list.sort()
+        self.filter_type_list += ['others']
+        self.conference_list = None
 
     def initWindow(self):
         self.root.protocol("WM_DELETE_WINDOW", self.closeWindow)
@@ -1229,7 +1246,7 @@ class LibraryGUI:
         self.display_papers.bind("<Double-1>", self.openPaperEvent)
 
         # generate conference combobox
-        self.add_conference['value'] = ['please select'] + self.authorize_conference_list
+        self.add_conference['value'] = ['please select'] + self.conference_list
         self.add_conference['state'] = "readonly"
         self.add_conference.current(0)
 
@@ -1268,9 +1285,12 @@ class LibraryGUI:
                 self.lib._conference_alias[c_str] = c_name
                 self.lib._conference_alias[new_authorized_cstr] = c_name
         
-        for c_str in self.lib.conferences:
-            self.authorize_conference_list.append(c_str)
-            self.lib.conferences[c_str].index = len(self.authorize_conference_list)
+        self.conference_list = list([k for k in self.lib.conferences if k != OTHERS_CONFERENCE])
+        self.conference_list.sort()
+        self.conference_list += ['others']
+        
+        for i, c_str in enumerate(self.conference_list):
+            self.lib.conferences[c_str].index = i+1
 
     # finish gui arrange
     def gui_arrang(self):
@@ -1394,46 +1414,20 @@ class LibraryGUI:
         self.clearBibData()
         self.clearOtherData()
 
-        self.serializeMode()
-
         self.revise_button.config(state=DISABLED)
         self.del_button.config(state=DISABLED)
         self.find_button.config(state=NORMAL)
         self.add_button.config(state=NORMAL)
         self.bib_parser_button.config(state=NORMAL)
     
-    def filterMode(self):
-        self.clearBibData()
-        self.clearOtherData()
-
-        self.add_button.config(state=DISABLED)
-        self.revise_button.config(state=DISABLED)
-        self.del_button.config(state=DISABLED)
-        self.find_button.config(state=NORMAL)
-    
-    def updateMode(self, paper_id):
-        tree_id = self.paper_to_tree[paper_id]
-
-        if paper_id in self.lib.papers:
-            paper = self.lib.papers[paper_id]
-            values = self.display_columns_values(paper)
-            for i, col in enumerate(self.display_columns):
-                self.display_papers.set(tree_id, column=col, value=values[i])
-        else:
-            self.display_papers.delete(tree_id)
-            del self.paper_to_tree[paper_id]
-        
-        df_idx = self.display_filter.curselection()
-        filtername = ''
-        if len(df_idx) > 0:
-            filtername = self.display_filter.get(df_idx)
-
+    def updateMode(self):
+        df_idx = self.cur_filter_index
         fc_idx = self.filter_category.current()
+        
         self.setFilterCategory(fc_idx)
-
+        
         displayed_filternames = self.display_filter.get(0, "end")
-        if filtername in displayed_filternames:
-            df_idx = displayed_filternames.index(filtername)
+        if df_idx >= 0 and df_idx < len(displayed_filternames):
             self.setDisplayFilter(df_idx)
 
         self.serializeMode()
@@ -1481,25 +1475,34 @@ class LibraryGUI:
             self.lib.addPaper(self.cur_paper)
             self.cur_paper._need_revise = False
             self.displayPaper([self.cur_paper.id])
-            
+
+            self.updateMode()
             self.addMode()
+            self.serializeMode()
         elif messagebox.askokcancel("Repeated File Error!","Do you want to browse the other file?") :
             self.resetMode()
             
             self.cur_paper = self.lib.papers[paper_id]
-            self.display_papers.selection_set(self.paper_to_tree[paper_id])
+            tree_id = self.paper_to_tree[paper_id]
+            self.display_papers.selection_set(tree_id)
 
     def delPaper(self):
         paper_id = self.cur_paper.id
 
         self.removed_files.append(self.cur_paper.full_path)
         self.lib.removePaper(paper_id)
-        self.updateMode(paper_id)
+        tree_id = self.paper_to_tree[paper_id]
+
+        self.display_papers.delete(tree_id)
+        del self.paper_to_tree[paper_id]
+
+        self.updateMode()
 
         cur_trees = self.display_papers.get_children()
         if len(cur_trees) > 0:
             next_paper_treeid = cur_trees[0]
-            self.cur_paper = self.lib.papers[self.display_papers.item(next_paper_treeid)['text']]
+            next_paper_id = self.display_papers.item(next_paper_treeid)['text']
+            self.cur_paper = self.lib.papers[next_paper_id]
             self.display_papers.selection_set(next_paper_treeid)
         else:
             self.resetMode()
@@ -1519,6 +1522,7 @@ class LibraryGUI:
         self.displayPaper(paper_ids)
     
     def revisePaper(self):
+        
         target_paper_id = self.cur_paper.id
 
         self.cur_paper = self.collectInputData()
@@ -1532,12 +1536,19 @@ class LibraryGUI:
         # not check bib info to support watch foler adding new paper
         elif self.cur_paper.checkState() == 2:
             messagebox.showinfo(message='Please input at least title, author, conference, year!')
+            self.cur_paper = self.lib.papers[target_paper_id]
             return
 
         if self.lib.revisePaper(target_paper_id, self.cur_paper):
             self.lib.papers[target_paper_id]._need_revise = False
 
-            self.updateMode(target_paper_id)
+            tree_id = self.paper_to_tree[target_paper_id]
+
+            paper = self.lib.papers[target_paper_id]
+            values = self.display_columns_values(paper)
+            for i, col in enumerate(self.display_columns):
+                self.display_papers.set(tree_id, column=col, value=values[i])
+            self.updateMode()
             
             messagebox.showinfo(message='Revise paper data success!')
             if target_paper_id in self.paper_to_tree:
@@ -1548,7 +1559,8 @@ class LibraryGUI:
                 cur_trees = self.display_papers.get_children()
                 if len(cur_trees) > 0:
                     next_paper_treeid = cur_trees[0]
-                    self.cur_paper = self.lib.papers[self.display_papers.item(next_paper_treeid)['text']]
+                    next_paper_id = self.display_papers.item(next_paper_treeid)['text']
+                    self.cur_paper = self.lib.papers[next_paper_id]
                     self.display_papers.selection_set(next_paper_treeid)
                 else:
                     self.resetMode()
@@ -1646,16 +1658,24 @@ class LibraryGUI:
 
     def setFilterCategory(self, idx):
         self.clearFilter()
+        self.clearDisplayPapers()
+        self.addMode()
         if idx != 0:
             if idx > 0 and idx <= len(self.filter_type_list):
                 self.filter_category.current(idx)
             else: idx = self.filter_category.current()
-            
             filtertype = self.filter_type_list[idx-1]
-            filters = self.filter_dict[filtertype]
+            filters = self.filter_dict[filtertype][0]
+            
+            tmp_f_list = [f for f in filters if f != 'others']
+            tmp_f_list.sort()
+            if 'others' in filters:
+                tmp_f_list.append('others')
 
-            for f in filters:
-                self.display_filter.insert(END, f)
+            if len(tmp_f_list) > 0:
+                for f in tmp_f_list:
+                    self.display_filter.insert(END, f)
+                self.setDisplayFilter(0)
         else:
             self.resetMode()
     
@@ -1687,10 +1707,10 @@ class LibraryGUI:
                                     title="Please select files:",
                                     filetypes=my_filetypes)
         if len(path_list) > 0:
-            self.importNewPapers(path_list)
-            self.setFilter('others', 'needRevise')
-            self.serializeMode()
-                
+            new_paper_ids = self.importNewPapers(path_list)
+            if len(new_paper_ids) > 0:
+                self.setFilter('others', 'needRevise')
+                self.serializeMode()
     
     def browseFiles(self):
         # Ask the user to select a single file name.
@@ -1712,7 +1732,7 @@ class LibraryGUI:
         return full_path
     
     def extractTitleFromPath(self, path):
-        filename = ntpath.basename(path)
+        filename = ntpath.basename(path).strip()
         title = filename
         for ft in filetypes:
             if filename.endswith(ft):
@@ -1764,9 +1784,6 @@ class LibraryGUI:
                 self.spinval.set(int(y_str))
         else:
             messagebox.showinfo(message="Can't find it on Google Scholar, please fill in more data!\n")
-    
-    def clearBibtex(self):
-        self.add_bib_input.delete(1.0, END)
     # event
 
     def closeWindow(self):
@@ -1777,7 +1794,6 @@ class LibraryGUI:
 
     def filterListingEvent(self, event):
         filter_type = self.filter_category.get()
-        
         self.setFilterCategoryByName(filter_type)
     
     def setProgress(self, cur_value, max_value):
@@ -1790,38 +1806,53 @@ class LibraryGUI:
             self.setDisplayFilter(filter_idx[0])
 
     def setDisplayFilter(self, idx):
+        self.display_filter.selection_clear(0, END)
+        self.cur_filter_index = -1
         displayed_filternames = self.display_filter.get(0, "end")
+        self.clearDisplayPapers()
+        self.addMode()
 
         if idx >= 0 and idx < len(displayed_filternames):
-            self.clearDisplayPapers()
             self.display_filter.selection_set(idx)
+            self.cur_filter_index = idx
 
-            item = self.display_filter.get(idx)
-            filter_name = self.filter_category.get()
-
+            filter_type = self.filter_category.get()
+            filter_name = self.display_filter.get(idx)
             paper_ids = set()
-            if filter_name in self.filter_dict:
-                filters = self.filter_dict[filter_name]
-                if filter_name == 'year' or filter_name == 'rating':
-                    paper_ids = filters[item]
-                elif filter_name == 'others':
-                    paper_ids = filters[item]()
+            if filter_type in self.filter_dict:
+                filters = self.filter_dict[filter_type][0]
+                if filter_type == 'year' or filter_type == 'rating':
+                    paper_ids = filters[filter_name]
+                elif filter_type == 'others':
+                    paper_ids = filters[filter_name]()
                 else:
-                    paper_ids = filters[item].papers
+                    paper_ids = filters[filter_name].papers
 
             if len(paper_ids) > 0:
                 self.displayPaper(paper_ids)
 
                 treeid = self.display_papers.get_children()[0]
-                self.cur_paper = self.lib.papers[self.display_papers.item(treeid)['text']]
-                self.display_papers.selection_set(treeid)
+                paper_id = self.display_papers.item(treeid)['text']
+                self.cur_paper = self.lib.papers[paper_id]
+                # self.display_papers.selection_set(treeid)
 
                 # show progress
                 total_num = len(paper_ids)
                 if total_num > 0:
                     unread_num = len( paper_ids & self.lib.findUnread())
                     self.setProgress(total_num-unread_num, total_num)
-                self.filterMode()
+            # present the filter name in paper information
+            # entry, text, combobox, spin, and check button
+            if filter_type == 'conference':
+                self.filter_dict[filter_type][1].current(self.cur_filter_index+1)
+            elif filter_type == 'year' or filter_type == 'rating' :
+                self.filter_dict[filter_type][1].set(int(filter_name))
+            elif filter_type == 'others' and filter_name == 'unRead' :
+                self.filter_dict[filter_type][1][filter_name].set(False)
+            elif filter_type == 'others' and filter_name =='hasGithub' :
+                self.filter_dict[filter_type][1][filter_name].set(True)
+            elif filter_name !='needRevise':
+                self.filter_dict[filter_type][1].insert(0, filter_name+';')
 
     def selectPaperEvent(self, event):
         self.selectMode()
@@ -1859,10 +1890,11 @@ class LibraryGUI:
     
     def collectBibData(self, bib):
         bib.title = self.add_title_input.get().strip()
+        
         bib.year = self.add_year_input.get()
 
         bib.conference = self.lib.parseConference(self.add_conference.get())
-        bib.author = self.lib.parseAuthors(self.add_author_input.get())
+        bib.author = self.lib.parseAuthors(self.add_author_input.get().strip())
 
         input_bibtex = self.add_bib_input.get(1.0, END).strip()
         bib.bibtex = input_bibtex if len(input_bibtex) > 0 else bib.__repr__()
@@ -1925,7 +1957,11 @@ class LibraryGUI:
 
     def clearFilter(self):
         self.display_filter.delete(0, END)
+        self.cur_filter_index = -1
         self.setProgress(0,1)
+
+    def clearBibtex(self):
+        self.add_bib_input.delete(1.0, END)
 
     def clearBibData(self):
         self.add_bib_input.delete(1.0, END)
