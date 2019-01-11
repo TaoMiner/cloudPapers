@@ -11,13 +11,15 @@ World Wide Web Conference	WWW
 Transactions on Knowledge and Data Engineering	TKDE
 Neural Information Processing Systems	NIPS
 Computer Vision and Pattern Recognition	CVPR
-International Conference on Machine Learning ICML
-International Conference on Computer Vision ICCV
-International Conference on Computational Linguistics COLING
-Conference on Natural Language Learning CoNLL
-Journal of Machine Learning Research JMLR
-Transactions on Information Systems TOIS
+International Conference on Machine Learning	ICML
+International Conference on Computer Vision	ICCV
+International Conference on Computational Linguistics	COLING
+Conference on Natural Language Learning	CoNLL
+Journal of Machine Learning Research	JMLR
+Transactions on Information Systems	TOIS
 Transactions on Knowledge Discovery from Data	TKDD
 International Conference on Knowledge Discovery	KDD
-SIGKDD KDD
-Conference on Research \& Development in Information Retrieval SIGIR
+SIGKDD	KDD
+Conference on Research \& Development in Information Retrieval	SIGIR
+International Conference on Learning Representations	ICLR
+International Semantic Web Conference	ISWC

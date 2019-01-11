@@ -209,7 +209,7 @@ class Bib:
     def __init__(self):
         self._title = ""
         self._author = []
-        self._conference = Conference(OTHERS_CONFERENCE)
+        self._conference = None
         self._year = DEFAULT_YEAR
         
         self._first_title_word = ""
@@ -254,7 +254,7 @@ class Bib:
     
     @conference.setter
     def conference(self, value):
-        self._conference = Conference(OTHERS_CONFERENCE)
+        self._conference = None
         if isinstance(value, str) and len(value) > 0:
             value = Conference(value.lower())
         if isinstance(value, Conference) :
@@ -324,7 +324,7 @@ class bibParser:
     def conferenceParser(cls, bib_str, lib=None):
         m = conference_re.search(bib_str)
         c_str = m.group() if m else ""
-        if lib is not None:
+        if lib is not None and len(c_str) > 0:
             conference = lib.parseConference(c_str)
             return conference
         return c_str
@@ -452,7 +452,10 @@ class Paper(object):
 
     @property
     def conference(self):
-        return self.bib.conference.label
+        if self.bib.conference is not None:
+            return self.bib.conference.label
+        else:
+            return ""
     
     @conference.setter
     def conference(self, value):
@@ -554,7 +557,7 @@ class Paper(object):
         state = 0
         if self._path == "" :
             state = 1
-        elif self.title == "" or self.author == "" or self.conference == OTHERS_CONFERENCE or self.year == str(DEFAULT_YEAR) :
+        elif self.title == "" or self.author == "" or self.conference == "" or self.year == str(DEFAULT_YEAR) :
             state = 2
         return state
 
@@ -608,12 +611,14 @@ class Library:
         return self._ratings
     
     def parseConference(self, c_str):
-        c_list = self.findConference(c_str.lower())
-        re_c = c_list[0]
-        # todo: compute similarity and pick up the similarer one
-        for c in c_list:
-            if c_str == c.label:
-                re_c = c
+        re_c = None
+        if len(c_str) > 0:
+            c_list = self.findConference(c_str.lower())
+            re_c = c_list[0]
+            # todo: compute similarity and pick up the similarer one
+            for c in c_list:
+                if c_str == c.label:
+                    re_c = c
         return re_c
     
     def parseAuthors(self, a_str):
@@ -710,7 +715,8 @@ class Library:
         self.addPaperYear(paper_id, paper.bib.year)
         self.addPaperRating(paper_id, paper._rating)
 
-        paper.bib.conference.papers.add(paper_id)
+        if paper.bib.conference is not None:
+            paper.bib.conference.papers.add(paper_id)
         
         self.addPaperCategory(paper_id, paper.bib.author, self.authors)
         self.addPaperCategory(paper_id, paper._tag, self.tags)
@@ -764,8 +770,9 @@ class Library:
             target_paper.bib.year = bib.year
             hasRevised = True
         
-        if target_paper.conference != bib.conference.label:
-            target_paper.bib.conference.papers.remove(paper_id)
+        if bib.conference is not None and target_paper.conference != bib.conference.label:
+            if target_paper.bib.conference is not None:
+                target_paper.bib.conference.papers.remove(paper_id)
             target_paper.bib.conference = bib.conference
             bib.conference.papers.add(paper_id)
             hasRevised = True
@@ -845,11 +852,18 @@ class Library:
         self.paper_id_pool.add(tmp_id)
         self.max_paper_id = tmp_id
     
-    def similarity(self, str_a, str_b, support_fuzzy=False):
+    def similarity(self, input_str, target_str, support_fuzzy=False):
+        str_a = input_str.lower()
+        str_b = target_str.lower()
         if not support_fuzzy:
-            return str_a.lower() == str_b.lower()
+            return str_a == str_b
+        
         if str_a in str_b or str_b in str_a :
             return True
+        tokens_a = re.split(r'[\s,_-]', str_a)
+        for token in tokens_a:
+            if token in str_b:
+                return True
         return False
     
     def searchDuplicatePaper(self, paper):
@@ -873,7 +887,7 @@ class Library:
         if len(paper.title) > 0:
             title_papers = self.findTitle(paper.title, target_paper_ids=target_paper_ids, support_fuzzy=support_fuzzy)
 
-        if paper.conference != OTHERS_CONFERENCE:
+        if paper.conference != OTHERS_CONFERENCE and len(paper.conference) > 0:
             conferences = self.findConference(paper.conference, support_fuzzy=support_fuzzy)
             conference_papers = self.combineListFindResults([c.papers for c in conferences])
 
@@ -985,17 +999,21 @@ class Library:
         return papers
 
     def getConferenceName(self, c_str):
-        return self._conference_alias[c_str] if c_str in self._conference_alias else OTHERS_CONFERENCE
+        if len(c_str) > 0:
+            return self._conference_alias[c_str] if c_str in self._conference_alias else OTHERS_CONFERENCE
+        else: return c_str
     
     def findConference(self, c_str, support_fuzzy=False):
         conferences = []
-        if c_str != OTHERS_CONFERENCE:
+        if c_str != OTHERS_CONFERENCE and len(c_str) > 0:
             for c_name in self._conference_alias:
                 if c_str == c_name or c_name in c_str :
                     conferences.append(self.conferences[self._conference_alias[c_name]])
                 elif support_fuzzy and self.similarity(c_str, c_name, support_fuzzy=support_fuzzy):
                     conferences.append(self.conferences[self._conference_alias[c_name]])
-        return conferences if len(conferences) > 0 else [self._conferences[OTHERS_CONFERENCE]]
+            return conferences if len(conferences) > 0 else [self._conferences[OTHERS_CONFERENCE]]
+        else:
+            return [None]
     
     def findItems(self, key_words, item_dict, support_fuzzy=False):
         items = []
@@ -1548,9 +1566,9 @@ class LibraryGUI:
             values = self.display_columns_values(paper)
             for i, col in enumerate(self.display_columns):
                 self.display_papers.set(tree_id, column=col, value=values[i])
+            messagebox.showinfo(message='Revise paper data success!')
             self.updateMode()
             
-            messagebox.showinfo(message='Revise paper data success!')
             if target_paper_id in self.paper_to_tree:
                 tree_id = self.paper_to_tree[target_paper_id]
                 self.cur_paper = self.lib.papers[target_paper_id]
@@ -1783,7 +1801,7 @@ class LibraryGUI:
             if len(y_str) > 0:
                 self.spinval.set(int(y_str))
         else:
-            messagebox.showinfo(message="Can't find it on Google Scholar, please fill in more data!\n")
+            messagebox.showinfo(message="Can't find it on Google Scholar, bad network or require more data!\n")
     # event
 
     def closeWindow(self):
@@ -1934,7 +1952,10 @@ class LibraryGUI:
         self.add_bib_input.insert(1.0, bib.bibtex)
         self.add_title_input.insert(0, bib.title)
         self.add_author_input.insert(0, Author.guiString(bib.author))
-        self.add_conference.current(bib.conference.index)
+        if bib.conference is not None:
+            self.add_conference.current(bib.conference.index)
+        else:
+            self.add_conference.current(0)
         self.spinval.set(bib.year)
 
     def displayOtherData(self, paper):
