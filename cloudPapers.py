@@ -82,20 +82,21 @@ author_format_re = re.compile(r'^(.+?)[, ](.+?);(.*)')
 author_format1_re = re.compile(r'^(.+?)[, ](.+?) and (.*)')
 class Author(Category):
     def __init__(self, label):
-        self.first_name, self.last_name = self.nameParse(label)
+        self.last_name, self.first_name = self.nameParse(label)
         self.label = self.getFullname(self.first_name, self.last_name)
         self.papers = set()
 
-    def getFullname(self, first_name, last_name):
-        if len(self.last_name) > 0 and len(self.first_name) > 0:
-            return self.last_name + ', ' + self.first_name
-        elif len(self.last_name) > 0 :
-            return self.last_name
+    @classmethod
+    def getFullname(cls, first_name, last_name):
+        if len(last_name) > 0 and len(first_name) > 0:
+            return last_name + ', ' + first_name
+        elif len(last_name) > 0 :
+            return last_name
         else: return ""
     
     @classmethod
     def nameParse(cls, full_name):
-        reverse=True if ',' in full_name else False
+        reverse=False if ',' in full_name else True
 
         tmp_names = re.split(',| ', full_name.strip())
         names = []
@@ -626,7 +627,7 @@ class Library:
         items = Author.parseAuthorString(a_str.lower())
         for item in items:
             last_name, first_name = Author.nameParse(item)
-            full_name = last_name + ', ' + first_name
+            full_name = Author.getFullname(first_name, last_name)
             a_list = self.findAuthor(full_name)
             if len(a_list) > 0:
                 authors.append(a_list[0])
@@ -676,7 +677,8 @@ class Library:
                 if len(self.years[del_paper.bib.year]) == 0:
                     del self.years[del_paper.bib.year]
 
-            del_paper.bib.conference.papers.remove(paper_id)
+            if del_paper.bib.conference is not None:
+                del_paper.bib.conference.papers.remove(paper_id)
 
             for a in del_paper.bib.author:
                 a.papers.remove(paper_id)
@@ -887,7 +889,7 @@ class Library:
         if len(paper.title) > 0:
             title_papers = self.findTitle(paper.title, target_paper_ids=target_paper_ids, support_fuzzy=support_fuzzy)
 
-        if paper.conference != OTHERS_CONFERENCE and len(paper.conference) > 0:
+        if paper.conference is not None and paper.conference != OTHERS_CONFERENCE :
             conferences = self.findConference(paper.conference, support_fuzzy=support_fuzzy)
             conference_papers = self.combineListFindResults([c.papers for c in conferences])
 
@@ -920,7 +922,7 @@ class Library:
         
         tmp_papers, isAnd = self.combineTwoFindResults(title_papers, author_papers, len(paper.title) > 0, len(paper.author) > 0)
 
-        tmp_papers, isAnd = self.combineTwoFindResults(tmp_papers, conference_papers, isAnd, paper.conference != OTHERS_CONFERENCE)
+        tmp_papers, isAnd = self.combineTwoFindResults(tmp_papers, conference_papers, isAnd, paper.conference is not None and paper.conference != OTHERS_CONFERENCE)
 
         tmp_papers, isAnd = self.combineTwoFindResults(tmp_papers, year_papers, isAnd, paper.bib.year > DEFAULT_YEAR)
         
@@ -932,7 +934,7 @@ class Library:
         
         if target_paper_ids is not None:
             tmp_papers =[pi for pi in tmp_papers if pi in target_paper_ids]
-        return tmp_papers
+        return list(tmp_papers)
     
     def combineTwoFindResults(self, papers1, papers2, isAnd1, isAnd2):
         papers = set()
@@ -1223,7 +1225,7 @@ class LibraryGUI:
     def initLib(self):
         # load existing papers
         self.deserialize()
-        self.displayPaper(self.lib.papers)
+        self.displayPaper(list(self.lib.papers.keys()))
 
         self.other_filter_set = {'unRead': self.lib.findUnread, 'hasGithub': self.lib.findGithub, 'needRevise':self.lib.findToRevise}
         self.other_inputs = {'unRead': self.hasRead, 'hasGithub': self.hasGithub}
@@ -1409,6 +1411,7 @@ class LibraryGUI:
             self.removed_files.clear()
         messagebox.showinfo(message='Save lib data success!')
         self.unserializeMode()
+        self.root.update()
     
     def deserialize(self):
         if os.path.isfile(lib_file):
@@ -1457,7 +1460,7 @@ class LibraryGUI:
         self.clearOtherData()
 
         self.clearDisplayPapers()
-        self.displayPaper(self.lib.papers)
+        self.displayPaper(list(self.lib.papers.keys()))
         
         self.filter_category.current(0)
         self.clearFilter()
@@ -1481,9 +1484,11 @@ class LibraryGUI:
 
         if self.cur_paper.checkState() == 1:
             messagebox.showinfo(message='Wrong path!')
+            self.root.update()
             return
         elif self.cur_paper.checkState() == 2:
             messagebox.showinfo(message='Please input at least title, author, conference, year!')
+            self.root.update()
             return
 
         # search the title and path
@@ -1503,6 +1508,8 @@ class LibraryGUI:
             self.cur_paper = self.lib.papers[paper_id]
             tree_id = self.paper_to_tree[paper_id]
             self.display_papers.selection_set(tree_id)
+
+            self.root.update()
 
     def delPaper(self):
         paper_id = self.cur_paper.id
@@ -1534,9 +1541,10 @@ class LibraryGUI:
 
         if len(paper_ids) < 1:
             messagebox.showinfo(message='Find nothing!')
+            self.root.update()
             return
 
-        self.clearDisplayPapers()
+        self.clearDisplayPapers(paper_ids)
         self.displayPaper(paper_ids)
     
     def revisePaper(self):
@@ -1550,11 +1558,13 @@ class LibraryGUI:
         if self.cur_paper.checkState() == 1 or ( depulated_pi >= 0 and depulated_pi != target_paper_id):
             messagebox.showinfo(message='Wrong path or repeated path/title!')
             self.cur_paper = self.lib.papers[target_paper_id]
+            self.root.update()
             return
         # not check bib info to support watch foler adding new paper
         elif self.cur_paper.checkState() == 2:
             messagebox.showinfo(message='Please input at least title, author, conference, year!')
             self.cur_paper = self.lib.papers[target_paper_id]
+            self.root.update()
             return
 
         if self.lib.revisePaper(target_paper_id, self.cur_paper):
@@ -1582,6 +1592,7 @@ class LibraryGUI:
                     self.display_papers.selection_set(next_paper_treeid)
                 else:
                     self.resetMode()
+            self.root.update()
         else:
             tree_id = self.paper_to_tree[target_paper_id]
             self.cur_paper = self.lib.papers[target_paper_id]
@@ -1644,6 +1655,9 @@ class LibraryGUI:
                     if len(paper.bib.bibtex) > 0 :
                         b = bibParser.parse(paper.bib.bibtex, self.lib)
                         if self.lib.revisePaperBib(paper_id, b) : revise_bib_count += 1
+                        if paper.checkState() > 0:
+                            nofile_lib_pis.add(paper_id)
+                            paper._need_revise = True
 
                 # correct path
                 for f in to_be_corrected_files:
@@ -1665,6 +1679,7 @@ class LibraryGUI:
                     messagebox.showinfo(message="Reparse success! {} bibtex and {} path!\n".format(revise_bib_count, len(to_be_corrected_files)))
                     if revise_bib_count > 0 or len(to_be_corrected_files)>0:
                         self.serializeMode()
+        self.root.update()
     
     def setFilter(self, filter_category, filtername):
         self.setFilterCategoryByName(filter_category)
@@ -1802,6 +1817,7 @@ class LibraryGUI:
                 self.spinval.set(int(y_str))
         else:
             messagebox.showinfo(message="Can't find it on Google Scholar, bad network or require more data!\n")
+            self.root.update()
     # event
 
     def closeWindow(self):
@@ -1827,7 +1843,6 @@ class LibraryGUI:
         self.display_filter.selection_clear(0, END)
         self.cur_filter_index = -1
         displayed_filternames = self.display_filter.get(0, "end")
-        self.clearDisplayPapers()
         self.addMode()
 
         if idx >= 0 and idx < len(displayed_filternames):
@@ -1846,8 +1861,11 @@ class LibraryGUI:
                 else:
                     paper_ids = filters[filter_name].papers
 
-            if len(paper_ids) > 0:
-                self.displayPaper(paper_ids)
+            if len(paper_ids) == 0:
+                self.clearDisplayPapers()
+            else :
+                self.clearDisplayPapers(paper_ids)
+                self.displayPaper(list(paper_ids))
 
                 treeid = self.display_papers.get_children()[0]
                 paper_id = self.display_papers.item(treeid)['text']
@@ -1871,6 +1889,7 @@ class LibraryGUI:
                 self.filter_dict[filter_type][1][filter_name].set(True)
             elif filter_name !='needRevise':
                 self.filter_dict[filter_type][1].insert(0, filter_name+';')
+        else : self.clearDisplayPapers()
 
     def selectPaperEvent(self, event):
         self.selectMode()
@@ -1938,7 +1957,9 @@ class LibraryGUI:
     # display data
     
     def displayPaper(self, paper_ids):
+        paper_ids.sort(reverse=True)
         for pi in paper_ids:
+            if pi in self.paper_to_tree : continue
             tree_id = self.display_papers.insert('', 'end', text=pi, values=self.display_columns_values(self.lib.papers[pi]))
             self.paper_to_tree[pi] = tree_id
 
@@ -1971,10 +1992,20 @@ class LibraryGUI:
         self.hasGithub.set(paper.hasGithub)
     
     # clear data
-    
-    def clearDisplayPapers(self):
-        self.paper_to_tree.clear()
-        self.display_papers.delete(*self.display_papers.get_children())
+    # not delete paper_ids
+    def clearDisplayPapers(self, paper_ids=[]):
+        tmp_set = set(paper_ids)
+        del_set = set()
+        if len(paper_ids) > 0:
+            for pi in self.paper_to_tree:
+                if pi in tmp_set : continue
+                self.display_papers.delete(self.paper_to_tree[pi])
+                del_set.add(pi)
+            for pi in del_set:
+                del self.paper_to_tree[pi]
+        else:         
+            self.paper_to_tree.clear()
+            self.display_papers.delete(*self.display_papers.get_children())
 
     def clearFilter(self):
         self.display_filter.delete(0, END)
