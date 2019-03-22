@@ -52,7 +52,7 @@ MAX_RATING = 5
 OTHERS_CONFERENCE = 'others'
 
 # Build a list of tuples for each file type the file dialog should display
-my_filetypes = [('all files', '.*'), ('pdf files', '.pdf'), ('text files', '.txt')]
+my_filetypes = [('all files', '.*'), ('pdf files', '.pdf'), ('Word files', '.doc'), ('Word files', '.docx'), ('text files', '.txt')]
 filetypes = tuple([ftype[1] for ftype in my_filetypes[1:]])
 
 class Category:
@@ -96,23 +96,26 @@ class Author(Category):
     
     @classmethod
     def nameParse(cls, full_name):
-        reverse=False if ',' in full_name else True
+        reverse = False if ',' in full_name else True
+        full_name = full_name.strip()
 
-        tmp_names = re.split(',| ', full_name.strip())
-        names = []
-        for n in tmp_names:
-            if len(n.strip()) > 0:
-                names.append(n.strip())
-        name1 = ""
-        name2 = ""
-        if len(names) > 0:
-            name1 = names[0]
-        if len(names) > 1 :
-            name2 = names[-1]
-        if reverse:
-            return name2, name1
+        last_name = ""
+        first_name = ""
+        if not reverse:
+            splitted_names = full_name.split(',', 2)
+            if len(splitted_names) == 1 :
+                last_name = full_name
+            else:
+                last_name = splitted_names[0].strip()
+                first_name = splitted_names[1].strip()
         else:
-            return name1, name2
+            splitted_names = full_name.rsplit(' ', 1)
+            if len(splitted_names) == 1 :
+                last_name = full_name
+            else:
+                last_name = splitted_names[1].strip()
+                first_name = splitted_names[0].strip()
+        return last_name, first_name
 
     @classmethod
     def parseFormat1(cls, author_str):
@@ -275,10 +278,11 @@ class Bib:
     
     def __repr__(self):
         tmp_cite = self._first_author_name + str(self.year)+ self._first_title_word
+        tmp_c_str = "" if self.conference is None else self.conference.label
         if self.type == 1:
-            return "@article{{{},\n  title={{{}}},\n  author={{{}}},\n  journal={{{}}},\n  year={{{}}}\n}}".format(tmp_cite, self.title, Author.bibString(self.author), self.conference.label, str(self.year))
+            return "@article{{{},\n  title={{{}}},\n  author={{{}}},\n  journal={{{}}},\n  year={{{}}}\n}}".format(tmp_cite, self.title, Author.bibString(self.author), tmp_c_str, str(self.year))
         else:
-            return "@inproceedings{{{},\n  title={{{}}},\n  author={{{}}},\n  booktitle={{{}}},\n  year={{{}}}\n}}".format(tmp_cite, self.title, Author.bibString(self.author), self.conference.label, str(self.year))
+            return "@inproceedings{{{},\n  title={{{}}},\n  author={{{}}},\n  booktitle={{{}}},\n  year={{{}}}\n}}".format(tmp_cite, self.title, Author.bibString(self.author), tmp_c_str, str(self.year))
 
     def shortString(self):
         return " ".join([self.title, ' '.join([a.label for a in self.author]), str(self.year) if self.year!=DEFAULT_YEAR else ''])
@@ -878,77 +882,54 @@ class Library:
     # todo: better fuzzy comment
     def findPaper(self, paper, target_paper_ids=None, support_fuzzy=False, fuzzy_window=0):
         
-        title_papers = set()
-        author_papers = set()
-        conference_papers = set()
-        year_papers = set()
-        tag_papers = set()
-        dataset_papers = set()
-        project_papers = set()
+        papers_list = []
 
         if len(paper.title) > 0:
             title_papers = self.findTitle(paper.title, target_paper_ids=target_paper_ids, support_fuzzy=support_fuzzy)
+            papers_list.append(title_papers)
 
-        if paper.conference is not None and paper.conference != OTHERS_CONFERENCE :
+        if paper.conference != "" and paper.conference != OTHERS_CONFERENCE :
             conferences = self.findConference(paper.conference, support_fuzzy=support_fuzzy)
             conference_papers = self.combineListFindResults([c.papers for c in conferences])
+            papers_list.append(conference_papers)
 
         if paper.bib.year > DEFAULT_YEAR:
             year_papers = self.findYear(paper.year, fuzzy_window=fuzzy_window)
+            papers_list.append(year_papers)
         
         if len(paper.author) > 0:
             authors = []
             for a in paper.bib.author:
                 authors.extend(self.findAuthor(a.label, support_fuzzy=support_fuzzy))
             author_papers = self.combineListFindResults([a.papers for a in authors])
+            papers_list.append(author_papers)
         
         if len(paper.tag) > 0:
             tags = []
             for t in paper._tag:
                 tags.extend(self.findTag(t.label, support_fuzzy=support_fuzzy))
             tag_papers = self.combineListFindResults([t.papers for t in tags])
+            papers_list.append(tag_papers)
         
         if len(paper.dataset) > 0:
             datasets = []
             for d in paper._dataset:
                 datasets.extend(self.findDataset(d.label, support_fuzzy=support_fuzzy))
             dataset_papers = self.combineListFindResults([d.papers for d in datasets])
+            papers_list.append(dataset_papers)
         
         if len(paper.project) > 0:
             projects = []
             for p in paper._project:
                 projects.extend(self.findProject(p.label, support_fuzzy=support_fuzzy))
             project_papers = self.combineListFindResults([p.papers for p in projects])
-        
-        tmp_papers, isAnd = self.combineTwoFindResults(title_papers, author_papers, len(paper.title) > 0, len(paper.author) > 0)
+            papers_list.append(project_papers)
 
-        tmp_papers, isAnd = self.combineTwoFindResults(tmp_papers, conference_papers, isAnd, paper.conference is not None and paper.conference != OTHERS_CONFERENCE)
-
-        tmp_papers, isAnd = self.combineTwoFindResults(tmp_papers, year_papers, isAnd, paper.bib.year > DEFAULT_YEAR)
-        
-        tmp_papers, isAnd = self.combineTwoFindResults(tmp_papers, tag_papers, isAnd, len(paper.tag) > 0)
-        
-        tmp_papers, isAnd = self.combineTwoFindResults(tmp_papers, dataset_papers, isAnd, len(paper.dataset) > 0)
-        
-        tmp_papers, isAnd = self.combineTwoFindResults(tmp_papers, project_papers, isAnd, len(paper.project) > 0)
+        tmp_papers = self.combineListFindResults(papers_list, True)
         
         if target_paper_ids is not None:
             tmp_papers =[pi for pi in tmp_papers if pi in target_paper_ids]
         return list(tmp_papers)
-    
-    def combineTwoFindResults(self, papers1, papers2, isAnd1, isAnd2):
-        papers = set()
-        isAnd = False
-        if isAnd1 and isAnd2:
-            papers = papers1 & papers2
-            isAnd = True
-        elif isAnd1:
-            papers = papers1
-            isAnd = True
-        elif isAnd2:
-            papers = papers2
-            isAnd = True
-        return papers, isAnd
 
     def combineListFindResults(self, papers_list, isAnd=True):
         re_papers = set()
@@ -1014,6 +995,8 @@ class Library:
                 elif support_fuzzy and self.similarity(c_str, c_name, support_fuzzy=support_fuzzy):
                     conferences.append(self.conferences[self._conference_alias[c_name]])
             return conferences if len(conferences) > 0 else [self._conferences[OTHERS_CONFERENCE]]
+        elif c_str == OTHERS_CONFERENCE:
+            return [self._conferences[OTHERS_CONFERENCE]]
         else:
             return [None]
     
@@ -1560,7 +1543,7 @@ class LibraryGUI:
             self.cur_paper = self.lib.papers[target_paper_id]
             self.root.update()
             return
-        # not check bib info to support watch foler adding new paper
+        # not check bib info to support watch folder adding new paper
         elif self.cur_paper.checkState() == 2:
             messagebox.showinfo(message='Please input at least title, author, conference, year!')
             self.cur_paper = self.lib.papers[target_paper_id]
@@ -1621,7 +1604,7 @@ class LibraryGUI:
             
             for (dirpath, dirs, filenames) in os.walk(application_path):
                 # skip hidden folders and files
-                files = [f for f in filenames if not f[0] == '.' and f.endswith('.pdf')]
+                files = [f for f in filenames if not f[0] == '.' and f.endswith(filetypes)]
                 dirs[:] = [d for d in dirs if not d[0] == '.']
 
                 for filename in files:
@@ -1930,7 +1913,10 @@ class LibraryGUI:
         
         bib.year = self.add_year_input.get()
 
-        bib.conference = self.lib.parseConference(self.add_conference.get())
+        c_str = self.add_conference.get()
+        
+        bib.conference = self.lib.conferences[c_str] if c_str in self.lib.conferences else None
+        
         bib.author = self.lib.parseAuthors(self.add_author_input.get().strip())
 
         input_bibtex = self.add_bib_input.get(1.0, END).strip()
