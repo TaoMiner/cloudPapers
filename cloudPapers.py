@@ -46,6 +46,8 @@ if getattr(sys, 'frozen', False):
 
 # configure
 lib_file = os.path.join(application_path, "papers.dat")
+toread_file = os.path.join(application_path, "toread.txt")
+unread_file = os.path.join(application_path, "unread.txt")
 conference_file = os.path.join(application_path, "conference.dat")
 DEFAULT_YEAR = 1900
 MAX_RATING = 5
@@ -572,9 +574,9 @@ class Library:
 
         self._authors = {}   # author_label: Author()
         self._conferences = {OTHERS_CONFERENCE:Conference(OTHERS_CONFERENCE)}   # conference_label: Conference()
-        self._datasets = {}   # dataset_label: Conference()
-        self._tags = {}   # tag_label: Conference()
-        self._projects = {}   # project_label: Conference()
+        self._datasets = {}   # dataset_label: Category()
+        self._tags = {}   # tag_label: Category()
+        self._projects = {}   # project_label: Category()
         self._ratings = {}      # rating: set(paper_id, ...)
 
         self._papers = {}   # paper_id: Paper()
@@ -1063,15 +1065,16 @@ class LibraryGUI:
         self.paper_to_tree = {}
         self.removed_files = []
 
-        self.display_columns = ('Title', 'Conference', 'Year', 'Read', 'Rating')
+        self.display_columns = ('Title', 'Conf', 'Year', 'R', 'S')
         self.display_columns_values = lambda x: (x.title, x.conference, x.year, '1' if x.hasRead else '0', x.rating)
 
         # gui style
-        self.display_column_width = {'Title':300, 'Conference':110, 'Year':60, 'Read':50, 'Rating':70}
+        self.display_column_width = {'Title':300, 'Conf':65, 'Year':60, 'R':20, 'S':20}
         self.fontSize = 16
         self.textfontSize = 14
         self.headFontSize = 14
-        self.cellWidth = 6
+        self.cellWidth = 5
+        self.bar_length = 70
 
         # gui
         self.root = Tk()
@@ -1085,18 +1088,19 @@ class LibraryGUI:
         self.filter_frame = ttk.Frame(self.root)
         self.display_frame = ttk.Frame(self.root)
         self.info_frame = ttk.Frame(self.root)
+        self.tags_frame = ttk.Frame(self.root)
 
         # filter
 
         self.labelCategoryInput = ttk.Label(self.filter_frame, text='FilterBy')
         filter_type_var = StringVar()
-        self.filter_category = ttk.Combobox(self.filter_frame, textvariable=filter_type_var, width=int(1*self.cellWidth))
+        self.filter_category = ttk.Combobox(self.filter_frame, textvariable=filter_type_var, width=int(2*self.cellWidth))
 
-        self.display_filter = Listbox(self.filter_frame, width=int(1*self.cellWidth))  # lists of existing filters
+        self.display_filter = Listbox(self.filter_frame, width=int(2*self.cellWidth))  # lists of existing filters
         self.df_yscroll = ttk.Scrollbar(self.filter_frame, command=self.display_filter.yview, orient=VERTICAL)
         self.display_filter.configure(yscrollcommand=self.df_yscroll.set)
 
-        self.progress = ttk.Progressbar(self.filter_frame, orient=HORIZONTAL, mode='determinate')
+        self.progress = ttk.Progressbar(self.filter_frame, length=self.bar_length, orient=HORIZONTAL, mode='determinate')
 
         # display paper
         self.display_papers = ttk.Treeview(self.display_frame)  # lists of existing papers
@@ -1164,6 +1168,18 @@ class LibraryGUI:
         self.reparse_button = ttk.Button(self.info_frame, command = self.reparse, text = "Renew", width=self.cellWidth)
         self.gScholar_button = ttk.Button(self.info_frame, command = self.fetchGS, text = "Web", width=self.cellWidth)
         self.import_button = ttk.Button(self.info_frame, command = self.importFiles, text = "Import", width=self.cellWidth)
+
+        # tags & projects display
+
+        self.labelTagDisplay = ttk.Label(self.tags_frame, text='Tags:')
+        self.display_tags = Listbox(self.tags_frame, width=int(2*self.cellWidth))
+        self.dtag_yscroll = ttk.Scrollbar(self.tags_frame, command=self.display_tags.yview, orient=VERTICAL)
+        self.display_tags.configure(yscrollcommand=self.dtag_yscroll.set)
+
+        self.labelProjectDisplay = ttk.Label(self.tags_frame, text='Projects:')
+        self.display_projects = Listbox(self.tags_frame, width=int(2*self.cellWidth))
+        self.dproj_yscroll = ttk.Scrollbar(self.tags_frame, command=self.display_projects.yview, orient=VERTICAL)
+        self.display_projects.configure(yscrollcommand=self.dproj_yscroll.set)
 
     def focus_next_widget(self, event):
         event.widget.tk_focusNext().focus()
@@ -1253,6 +1269,17 @@ class LibraryGUI:
         self.add_conference['state'] = "readonly"
         self.add_conference.current(0)
 
+        # init tag display
+        tmp_t_list = [t for t in self.lib.tags.keys()]
+        tmp_t_list.sort()
+        for t in tmp_t_list:
+            self.display_tags.insert(END, t)
+
+        tmp_p_list = [p for p in self.lib.projects.keys()]
+        tmp_p_list.sort()
+        for p in tmp_p_list:
+            self.display_projects.insert(END, p)
+
     def treeview_sort_column(self, tv, col, reverse):
         l = [(tv.set(k, col), k) for k in tv.get_children('')]
         l.sort(reverse=reverse)
@@ -1315,8 +1342,12 @@ class LibraryGUI:
         self.info_frame.rowconfigure(2, weight=1)
         self.info_frame.rowconfigure(15, weight=1)
 
+        self.tags_frame.pack(side = RIGHT, fill='both', expand=False, padx=(0, padding), pady=(padding,padding))
+        self.tags_frame.rowconfigure(1, weight=2)
+        self.tags_frame.rowconfigure(4, weight=1)
+
         # filter
-        self.labelCategoryInput.grid(row=0, column=0, sticky=E)
+        self.labelCategoryInput.grid(row=0, column=0, sticky=W)
         self.filter_category.grid(row=1, column=0, columnspan=2, sticky=(W,E))
         self.progress.grid(row=0, column=1, sticky=(W,S,E))
 
@@ -1383,6 +1414,16 @@ class LibraryGUI:
         self.revise_button.grid(row=18,column=2)
         self.find_button.grid(row=18,column=3)
         self.del_button.grid(row=18,column=4)
+
+        # tags & projects display
+
+        self.labelTagDisplay.grid(row=0, column=0, sticky=W)
+        self.display_tags.grid(row=1, column=0, rowspan=2, sticky=(N,W,E,S))
+        self.dtag_yscroll.grid(row=1, column=1, rowspan=2, sticky=(N,W,S))
+
+        self.labelProjectDisplay.grid(row=3, column=0, sticky=W)
+        self.display_projects.grid(row=4, column=0, sticky=(N,W,E,S))
+        self.dproj_yscroll.grid(row=4, column=1, sticky=(N,W,S))
     
     def serialize(self):
         f = open(lib_file, 'wb')
@@ -1392,6 +1433,18 @@ class LibraryGUI:
                 if os.path.isfile(f) :
                     os.remove(f)
             self.removed_files.clear()
+        
+        f = open(toread_file, 'w')
+        toread_ids = self.lib.tags['toread'].papers if 'toread' in self.lib.tags else set()
+        for pi in toread_ids:
+            f.write(self.lib.papers[pi].path+'\n')
+        f.close()
+
+        f = open(unread_file, 'w')
+        for pi in self.lib.findUnread():
+            f.write(self.lib.papers[pi].path+'\n')
+        f.close()
+
         messagebox.showinfo(message='Save lib data success!')
         self.unserializeMode()
         self.root.update()
@@ -1814,8 +1867,9 @@ class LibraryGUI:
         self.setFilterCategoryByName(filter_type)
     
     def setProgress(self, cur_value, max_value):
-        self.progress["maximum"] = max_value
-        self.progress["value"] = cur_value
+        
+        self.progress["maximum"] = self.bar_length
+        self.progress["value"] = int(cur_value/float(max_value) * self.bar_length)
     
     def filteredPaperEvent(self, event):
         filter_idx = self.display_filter.curselection()
